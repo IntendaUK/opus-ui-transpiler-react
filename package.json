@@ -1,0 +1,24 @@
+{
+	"name": "transpiler-hand-made",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"start": "node src/transpile.mjs"
+	},
+	"author": "",
+	"license": "ISC",
+	"dependencies": {
+		"@intenda/opus-ui-repeater-grid": "^2.1.0"
+	},
+	"devDependencies": {
+		"@intenda/opus-ui": "^2.6.4",
+		"@intenda/opus-ui-components": "^2.1.4",
+		"baseline-browser-mapping": "^2.9.11",
+		"eslint": "^9.39.1",
+		"eslint-plugin-react": "^7.37.4",
+		"eslint-plugin-react-compiler": "^19.1.0-rc.2",
+		"eslint-plugin-react-hooks": "^5.2.0",
+		"eslint-plugin-react-refresh": "^0.4.19"
+	}
+}
