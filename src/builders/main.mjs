@@ -55,8 +55,8 @@ const buildMain = ({ startupPath, themeNames }) => {
 	`;
 
 	const transpiled = template
-		//.replace('$PATH_TO_INDEX$', `dashboard/${startupPath}`)
-		.replace('$PATH_TO_INDEX$', 'dashboard/pocObjectLibrary/index')
+		.replace('$PATH_TO_INDEX$', `dashboard/${startupPath}`)
+		//.replace('$PATH_TO_INDEX$', 'dashboard/pocObjectLibrary/index')
 		.replace('$THEME_IMPORTS$', themeImports)
 		.replace('$THEMES_CONFIG$', themesConfig);
 

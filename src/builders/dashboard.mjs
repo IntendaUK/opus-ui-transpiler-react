@@ -13,13 +13,18 @@ const mainPrefixHasMainTrait = `
 	import { ExternalComponent, getSyncScriptResult, isConditionMet, getThemeValue } from '@intenda/opus-ui';
 `;
 
-const functionPrefix = `
+/*const functionPrefix = `
 	const Component = ExternalComponent(() => {
+		return (
+`;*/
+
+const functionPrefix = `
+	const Component = rest => {
 		return (
 `;
 
 const functionPrefixHasMainTrait = `
-	const Component = ({ prps, traitPrps = {}, ...rest }) => {
+	const Component = ({ scope, prps, traitPrps = {}, ...rest }) => {
 		const [ready, setReady] = useState(false);
 
 		useEffect(setTraitPrps.bind(null, traitPrps, setReady), [traitPrps]);
@@ -36,9 +41,16 @@ const functionPrefixFunctionalTrait = `
 	const FunctionalTrait = traitPrps => { return { 
 `;
 
-const functionSuffix = `
+/*const functionSuffix = `
 		);
 	});
+
+	export default Component;
+`;*/
+
+const functionSuffix = `
+		);
+	};
 
 	export default Component;
 `;
@@ -377,18 +389,36 @@ const generateComponent = (obj, isRootLevel = true) => {
 	let res;
 
 	let sysPrps = [];
+
 	['id', 'scope', 'relId', 'container'].forEach(key => {
-		if (obj[key]) {
-			if (hasFunctionalTraits)
-				sysPrps.push(`${key}: '${obj[key]}'`);
-			else
-				sysPrps.push(`${key}='${obj[key]}'`);
+		if (!obj[key])
+			return;
+
+		let bl = '{';
+		let br = '}';
+		let s = '=';
+
+		if (hasFunctionalTraits) {
+			bl = '';
+			br = '';
+			s = ':';
 		}
+
+		if (key === 'scope') {
+			if (isRootLevel)
+				sysPrps.push(`${key}${s}${bl}['${obj[key]}', scope]${br}`);
+			else
+				sysPrps.push(`${key}${s}'${obj[key]}'`);
+		} else
+			sysPrps.push(`${key}${s}'${obj[key]}'`);
 	});
+	if (isRootLevel && !obj.scope && traitsInfo?.mainTrait)
+		sysPrps.push('scope={scope}');
+
 	let sysPrpsString = sysPrps.join(hasFunctionalTraits ? ',' : ' ');
 
 	let restString = '';
-	if (isRootLevel && isTrait && !isFunctionalTrait)
+	if (isRootLevel && !isFunctionalTrait)
 		restString = '{...rest}';
 
 	let traitsString = '';
