@@ -32,6 +32,9 @@ const template = `
 		<Opus options={{ env }}
 			startupComponent={<Startup />}
 			themesConfig={themesConfig}
+			windowHelpers={{
+				include: ['spliceWhere']
+			}}
 		/>
 	);
 `;

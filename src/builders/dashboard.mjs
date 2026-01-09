@@ -19,7 +19,7 @@ const mainPrefixHasMainTrait = `
 `;*/
 
 const functionPrefix = `
-	const Component = rest => {
+	const Component = ({ scope, ...rest }) => {
 		return (
 `;
 
@@ -206,7 +206,7 @@ const buildTraitsInfo = ({ traits }) => {
 
 		Object.entries(traitPrps).forEach(([k, v]) => {
 			if (stringifiedContents.includes(`"wgts":"$${k}$"`))
-				traitPrps[k] = `<>${v.map(m => generateComponent(m, false)).join(',')}</>`;
+				traitPrps[k] = `<>${v.map(m => generateComponent(m, false)).join('')}</>`;
 		});
 
 		return {
@@ -231,7 +231,7 @@ const buildTraitsInfo = ({ traits }) => {
 	return res;
 };
 
-const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray = false }) => {
+const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray = false, isInRowMda = false }) => {
 	let combined = {};
 
 	if (prps)
@@ -297,6 +297,45 @@ const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray 
 
 		const vType = typeof(v);
 
+		if (isInRowMda && k === 'type') {
+			const componentLibrary = findComponentLibraryName(v);
+
+			if (componentLibrary) {
+				if (!usedComponentTypes.includes(v))
+					usedComponentTypes.push(v);
+
+				lines.push(`${key}: ${v[0].toUpperCase() + v.substring(1)}`);
+
+				return;
+			}
+		} else if (isInRowMda && k === 'traits') {
+			const traitsInfo = buildTraitsInfo(prps);
+
+			if (traitsInfo.mainTrait) {
+				const { type, path } = traitsInfo.mainTrait;
+
+				if (!traitImports.some(f => f.type === type)) {
+					traitImports.push({
+						type,
+						path
+					});
+				}
+
+				lines.push(`type: ${type}`);
+
+				const traitPrps = buildProps({
+					prps: traitsInfo.mainTrait.traitPrps,
+					wrap: false,
+					isInRowMda
+				});
+				lines.push(`traitPrps: {${traitPrps}}`);
+
+				return;
+			}
+
+			return;
+		}
+
 		if (vType === 'string') {
 			if (v[0] === '%' && v[v.length - 1] === '%')
 				value = `traitPrps.${v.replaceAll('%', '')}`;
@@ -317,12 +356,14 @@ const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray 
 			value = `[${buildProps({
 				prps: v,
 				wrap: false,
-				isArray: true
+				isArray: true,
+				isInRowMda: isInRowMda || k === 'rowMda'
 			})}]`;
 		} else if (vType === 'object' && v !== null) {
 			value = `{${buildProps({
 				prps: v,
-				wrap: false
+				wrap: false,
+				isInRowMda: isInRowMda || k === 'rowMda'
 			})}}`;
 		}
 
@@ -412,7 +453,7 @@ const generateComponent = (obj, isRootLevel = true) => {
 		} else
 			sysPrps.push(`${key}${s}'${obj[key]}'`);
 	});
-	if (isRootLevel && !obj.scope && traitsInfo?.mainTrait)
+	if (isRootLevel && !obj.scope)
 		sysPrps.push('scope={scope}');
 
 	let sysPrpsString = sysPrps.join(hasFunctionalTraits ? ',' : ' ');
