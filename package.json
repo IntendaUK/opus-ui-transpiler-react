@@ -13,6 +13,7 @@
 	},
 	"devDependencies": {
 		"@intenda/opus-ui": "^2.6.4",
+		"@intenda/opus-ui-code-editor": "^2.0.1",
 		"@intenda/opus-ui-components": "^2.1.4",
 		"baseline-browser-mapping": "^2.9.11",
 		"eslint": "^9.39.1",

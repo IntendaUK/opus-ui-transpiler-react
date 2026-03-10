@@ -11,6 +11,7 @@ import buildTheme from './builders/theme.mjs';
 import buildHelpers from './builders/helpers.mjs';
 import buildDashboard from './builders/dashboard.mjs';
 import buildScriptAction from './builders/scriptAction.mjs';
+import buildSrcFoldersAndFiles from './builders/srcFoldersAndFiles.mjs';
 
 let mdaPackage;
 const mapFiles = new Map();
@@ -199,6 +200,17 @@ const copyStaticFiles = () => {
 		'public'
 	);
 
+	// 4. public/*
+	const appSrc = resolve(
+		sourceApplicationFolder,
+		'app'
+	);
+
+	const appDest = resolve(
+		'output',
+		'app'
+	);
+
 	if (existsSync(publicSrc)) {
 		mkdirSync(publicDest, { recursive: true });
 
@@ -220,6 +232,28 @@ const copyStaticFiles = () => {
 		} else
 			execSync(`cp -R "${publicSrc}/." "${publicDest}"`);
 	}
+
+	if (existsSync(appSrc)) {
+		mkdirSync(appDest, { recursive: true });
+
+		if (process.platform === 'win32') {
+			try {
+				execSync(
+					`robocopy "${appSrc}" "${appDest}" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP`,
+					{ stdio: 'ignore' }
+				);
+			} catch (err) {
+				const code = err.status;
+
+				// Robocopy returns codes 0–3 for success
+				if (code > 3) {
+					console.error(`Robocopy failed with code ${code}`);
+					throw err;
+				}
+			}
+		} else
+			execSync(`cp -R "${appSrc}/." "${publicSrc}"`);
+	}
 };
 
 function copyCrossPlatform () {
@@ -229,10 +263,12 @@ function copyCrossPlatform () {
 	const srcSrc = resolve(outRoot, 'src');
 	const srcPublic = resolve(outRoot, 'public');
 	const srcIndex = resolve(outRoot, 'index.html');
+	const srcApp = resolve(outRoot, 'app');
 
 	const destSrc = resolve(destRoot, 'src');
 	const destPublic = resolve(destRoot, 'public');
 	const destIndex = resolve(destRoot, 'index.html');
+	const destApp = resolve(destRoot, 'app');
 
 	if (process.platform === 'win32') {
 		// src/
@@ -261,6 +297,19 @@ function copyCrossPlatform () {
 			}
 		}
 
+		// app/
+		if (existsSync(srcApp)) {
+			try {
+				execSync(
+					`robocopy "${srcApp}" "${destApp}" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP`,
+					{ stdio: 'ignore' }
+				);
+			} catch (err) {
+				if (err.status > 3)
+					throw err;
+			}
+		}
+
 		// index.html
 		if (existsSync(srcIndex)) {
 			mkdirSync(dirname(destIndex), { recursive: true });
@@ -270,6 +319,10 @@ function copyCrossPlatform () {
 		// src/
 		if (existsSync(srcSrc))
 			execSync(`cp -R "${srcSrc}" "${destSrc}"`);
+
+		// app/
+		if (existsSync(srcApp))
+			execSync(`cp -R "${srcApp}" "${destApp}"`);
 
 		// public/
 		if (existsSync(srcPublic))
@@ -293,6 +346,9 @@ loadMdaPackage();
 
 console.log('Building Files Map');
 buildFileSet(mdaPackage);
+
+console.log('Loading Custom Code');
+buildSrcFoldersAndFiles();
 
 console.log('Transpiling');
 createFiles();

@@ -5,12 +5,12 @@ import { dirname, join } from 'path';
 //Strings
 const mainPrefix = `
 	import React from 'react';
-	import { ExternalComponent, isConditionMet, getThemeValue } from '@intenda/opus-ui';
+	import { ExternalComponent, isConditionMet, getThemeValue, getDeepProperty } from '@intenda/opus-ui';
 `;
 
 const mainPrefixHasMainTrait = `
 	import React, { useEffect, useState } from 'react';
-	import { ExternalComponent, getSyncScriptResult, isConditionMet, getThemeValue } from '@intenda/opus-ui';
+	import { ExternalComponent, getSyncScriptResult, isConditionMet, getThemeValue, getDeepProperty } from '@intenda/opus-ui';
 `;
 
 /*const functionPrefix = `
@@ -245,7 +245,7 @@ const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray 
 			return;
 
 		let key = k;
-		if (key[0] === '^' || key[0] === '.' || key.includes('-'))
+		if (key[0] === '^' || key[0] === '.' || key.includes('-') || key.includes(' '))
 			key = `"${key}"`;
 
 		let value = JSON.stringify(v);
@@ -346,24 +346,29 @@ const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray 
 
 			//Value will be something like "0 0 {theme.global.padding}"
 			// and will be transpiled to `0 0 ${getThemeValue('global.padding')`
+			// unless it starts with {theme. and ends in }, then we won't include the wrapping ``
 			if (value.includes('{theme.')) {
-				value = '`' + value.substring(1, value.length - 1).replace(
-					/\{theme\.([^}]+)\}/g,
-					(_, path) => `\${getThemeValue('${path}')}`
-				) + '`';
+				if (value.indexOf('"{theme.') === 0 && value.indexOf('}"') === value.length - 2)
+					value = `getThemeValue('${value.replace('"{theme.', '').replace('}"', '')}')`;
+				else {
+					value = '`' + value.substring(1, value.length - 1).replace(
+						/\{theme\.([^}]+)\}/g,
+						(_, path) => `\${getThemeValue('${path}')}`
+					) + '`';
+				}
 			}
 		} else if (Array.isArray(v)) {
 			value = `[${buildProps({
 				prps: v,
 				wrap: false,
 				isArray: true,
-				isInRowMda: isInRowMda || k === 'rowMda'
+				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander'
 			})}]`;
 		} else if (vType === 'object' && v !== null) {
 			value = `{${buildProps({
 				prps: v,
 				wrap: false,
-				isInRowMda: isInRowMda || k === 'rowMda'
+				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander'
 			})}}`;
 		}
 
@@ -406,6 +411,13 @@ const generateComponent = (obj, isRootLevel = true) => {
 
 		if (!usedComponentTypes.includes(type))
 			usedComponentTypes.push(type);
+	}
+
+	if (type === 'viewport') {
+		prps = {
+			...prps,
+			loadFromJsx: true
+		};
 	}
 
 	let prpsString = buildProps({
@@ -622,7 +634,7 @@ const dashboard = ({ path, contents }, _mapFiles) => {
 	traitImports = [];
 	scriptImports = [];
 
-	const rootComponent = generateComponent(contents);
+	let rootComponent = generateComponent(contents);
 
 	//generateImports(usedComponentTypes);
 
@@ -649,6 +661,40 @@ const dashboard = ({ path, contents }, _mapFiles) => {
 	if (isTrait && !isFunctionalTrait) {
 		useMainPrefix = mainPrefixHasMainTrait;
 		onMountMethod = generateTraitOnMount(contents);
+	}
+
+	if (isTrait) {
+		//Replace things like "$icon$" with traitPrps.value
+		// and "1px 1px %borderColor%" with `1px 1px ${traitPrps.borderColor}`
+		Object.keys(contents.acceptPrps).forEach(k => {
+			rootComponent = rootComponent
+				.replaceAll(`"$${k}$"`, `traitPrps.${k}`)
+				.replaceAll(`"%${k}%"`, `\`traitPrps.${k}\``);
+		});
+
+		// Replace any quoted string containing %...% tokens
+		rootComponent = rootComponent.replace(
+			/:\s*"([^"]*%[^"]+%[^"]*)"/g,
+			(match, value) => {
+				const interpolated = value.replace(/%([^%]+)%/g, (_, token) => {
+					return `\${getDeepProperty(traitPrps, '${token}')}`;
+				});
+
+				return `: \`${interpolated}\``;
+			}
+		);
+
+		// Replace any quoted string containing $...$ tokens
+		rootComponent = rootComponent.replace(
+			/:\s*"([^"]*\$[^"]+\$[^"]*)"/g,
+			(match, value) => {
+				const interpolated = value.replace(/\$([^$]+)\$/g, (_, token) => {
+					return `getDeepProperty(traitPrps, '${token}')`;
+				});
+
+				return `: ${interpolated}`;
+			}
+		);
 	}
 
 	let transpiled = `
