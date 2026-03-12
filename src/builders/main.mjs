@@ -83,10 +83,10 @@ const templatifyOriginalMain = originalMain => {
 		);
 	}
 
-	// 4. Remove import './main.css';
+	// 4. Replace import './main.css';
 	result = result.replace(
 		/^[ \t]*import\s+['"]\.\/main\.css['"];?[ \t]*\r?\n/m,
-		''
+		'import \'./transpiled.css\';'
 	);
 
 	// 5. Inject $THEME_IMPORTS$ right after the last import

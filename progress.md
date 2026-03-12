@@ -1,8 +1,12 @@
 # Catchup
 
-## Current Status
-* The MBB app can be transpiled 100% without bugs
+## Transpilation Status
+* MBB App: 100%
+* Opus UI website: 100%
 
 ## Next Steps
 * Infinite recursion bug in morphProps when running transpiled Legoz
-* Functional traits in repeater rowMda isn't being applied
+
+# Todo
+* Only copy over json dashboards that are actually used
+* Only import getDeepProperty if actually used

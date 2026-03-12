@@ -329,8 +329,18 @@ const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray 
 					isInRowMda
 				});
 				lines.push(`traitPrps: {${traitPrps}}`);
+			}
 
-				return;
+			if (traitsInfo.otherTraits.length) {
+				const otherTraitsString = traitsInfo.otherTraits
+					.map(({ type, traitPrps }) => {
+						const res = `{ type: ${type}, traitPrps: ${JSON.stringify(traitPrps)} }`;
+
+						return res;
+					})
+					.join(',');
+
+				lines.push(`traits: [${otherTraitsString}]`);
 			}
 
 			return;
@@ -338,9 +348,9 @@ const buildProps = ({ prps, isRootLevel, keyName = 'prps', wrap = true, isArray 
 
 		if (vType === 'string') {
 			if (v[0] === '%' && v[v.length - 1] === '%')
-				value = `traitPrps.${v.replaceAll('%', '')}`;
+				value = `traitPrps.${v.replaceAll('%', '').split('.').join('?.')}`;
 			else if (v[0] === '$' && v[v.length - 1] === '$')
-				value = `traitPrps.${v.replaceAll('$', '')}`;
+				value = `traitPrps.${v.replaceAll('$', '').split('.').join('?.')}`;
 			else if (v.indexOf('<>') === 0 || k === 'handler' || v.indexOf('(() => {') === 0)
 				value = v;
 
@@ -432,6 +442,8 @@ const generateComponent = (obj, isRootLevel = true) => {
 		traitsInfo,
 		keyName: 'traitPrps'
 	});
+	if (traitsInfo?.mainTrait && !mainTraitPrpsString)
+		mainTraitPrpsString = 'traitPrps={{}}';
 
 	let children = [];
 	if (Array.isArray(wgts))
