@@ -1,10 +1,10 @@
 
-import { readFileSync, existsSync, mkdirSync, rmSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, rmSync, copyFileSync, writeFileSync, readdirSync, statSync, renameSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { ESLint } from 'eslint';
 import { execSync } from 'child_process';
 
-import { sourceApplicationFolder, targetApplicationFolder } from './config.mjs';
+import { sourceApplicationFolder, targetApplicationFolder, replaceMainJsx } from './config.mjs';
 
 import buildMain from './builders/main.mjs';
 import buildTheme from './builders/theme.mjs';
@@ -55,6 +55,15 @@ const loadMdaPackage = () => {
 
 	const fileContent = readFileSync(fullPath, 'utf8');
 	mdaPackage = JSON.parse(fileContent);
+
+	Object.assign(mdaPackage.dashboard, mdaPackage.blueprint);
+	delete mdaPackage.blueprint;
+
+	const res = JSON.stringify(mdaPackage)
+		.replaceAll('"blueprint":', '"trait":')
+		.replaceAll('"blueprintPrps":', '"traitPrps":');
+
+	mdaPackage = JSON.parse(res);
 };
 
 const buildFileSet = (obj, basePath = '') => {
@@ -139,13 +148,98 @@ const runEslintOnOutput = async () => {
 
 const deleteFolderCrossPlatform = folderPath => {
 	const fullPath = resolve(folderPath);
+	const mainPath = join(fullPath, 'main.jsx');
+
+	let mainContents = null;
+
+	if (!replaceMainJsx) {
+		if (existsSync(mainPath)) {
+			mainContents = readFileSync(mainPath, 'utf8');
+		}
+	}
 
 	try {
-		if (process.platform === 'win32')
+		if (process.platform === 'win32') {
 			execSync(`rmdir /s /q "${fullPath}"`);
-		else
+		} else {
 			execSync(`rm -rf "${fullPath}"`);
+		}
 	} catch (err) {}
+
+	if (!replaceMainJsx && mainContents !== null) {
+		mkdirSync(dirname(mainPath), { recursive: true });
+		writeFileSync(mainPath, mainContents, 'utf8');
+	}
+};
+
+const moveFolderContentsRecursive = (sourceFolder, destinationFolder) => {
+	if (!existsSync(sourceFolder))
+		return;
+
+	mkdirSync(destinationFolder, { recursive: true });
+
+	readdirSync(sourceFolder).forEach(name => {
+		const sourcePath = join(sourceFolder, name);
+		const destinationPath = join(destinationFolder, name);
+
+		if (statSync(sourcePath).isDirectory()) {
+			moveFolderContentsRecursive(sourcePath, destinationPath);
+
+			rmSync(sourcePath, {
+				recursive: true,
+				force: true
+			});
+
+			return;
+		}
+
+		mkdirSync(dirname(destinationPath), { recursive: true });
+
+		try {
+			renameSync(sourcePath, destinationPath);
+		} catch {
+			copyFileSync(sourcePath, destinationPath);
+			rmSync(sourcePath, { force: true });
+		}
+	});
+};
+
+const replaceRootActionsWithTraitArray = folderPath => {
+	if (!existsSync(folderPath))
+		return;
+
+	readdirSync(folderPath).forEach(name => {
+		const fullPath = join(folderPath, name);
+		const stats = statSync(fullPath);
+
+		if (stats.isDirectory()) {
+			replaceRootActionsWithTraitArray(fullPath);
+			return;
+		}
+
+		if (!name.endsWith('.json'))
+			return;
+ 
+		const raw = readFileSync(fullPath, 'utf8');
+
+		let parsed;
+		try {
+			parsed = JSON.parse(raw);
+		} catch (err) {
+			return;
+		}
+
+		if (!parsed || typeof(parsed) !== 'object' || Array.isArray(parsed))
+			return;
+
+		if (!Object.prototype.hasOwnProperty.call(parsed, 'actions'))
+			return;
+
+		parsed.traitArray = parsed.actions;
+		delete parsed.actions;
+
+		writeFileSync(fullPath, JSON.stringify(parsed, null, '\t'), 'utf8');
+	});
 };
 
 /*
@@ -253,6 +347,31 @@ const copyStaticFiles = () => {
 			}
 		} else
 			execSync(`cp -R "${appSrc}/." "${publicSrc}"`);
+
+		const appDashboardDest = resolve(
+			'output',
+			'app',
+			'dashboard'
+		);
+
+		const appBlueprintDest = resolve(
+			'output',
+			'app',
+			'blueprint'
+		);
+
+		// In every JSON file under blueprint, replace root-level "actions" with "traitArray"
+		replaceRootActionsWithTraitArray(appBlueprintDest);
+
+		// Recursively move all files/folders from inside appBlueprintDest to be inside appDashboardDest
+		moveFolderContentsRecursive(appBlueprintDest, appDashboardDest);
+
+		if (existsSync(appBlueprintDest)) {
+			rmSync(appBlueprintDest, {
+				recursive: true,
+				force: true
+			});
+		}
 	}
 };
 
@@ -269,6 +388,16 @@ function copyCrossPlatform () {
 	const destPublic = resolve(destRoot, 'public');
 	const destIndex = resolve(destRoot, 'index.html');
 	const destApp = resolve(destRoot, 'app');
+
+	const destMain = resolve(destSrc, 'main.jsx');
+
+	let mainContents = null;
+
+	if (!replaceMainJsx) {
+		if (existsSync(destMain)) {
+			mainContents = readFileSync(destMain, 'utf8');
+		}
+	}
 
 	if (process.platform === 'win32') {
 		// src/
@@ -334,6 +463,11 @@ function copyCrossPlatform () {
 			copyFileSync(srcIndex, destIndex);
 		}
 	}
+
+	if (!replaceMainJsx && mainContents !== null) {
+		mkdirSync(dirname(destMain), { recursive: true });
+		writeFileSync(destMain, mainContents, 'utf8');
+	}
 }
 
 setup();
@@ -356,13 +490,14 @@ createFiles();
 console.log('Copying Static Files');
 copyStaticFiles();
 
-console.log('Linting');
-await runEslintOnOutput();
+//console.log('Linting');
+//await runEslintOnOutput();
 
 await new Promise(res => setTimeout(res, 200));
 
 console.log('Performing Cleanup');
 const targetSrc = resolve(targetApplicationFolder, 'src');
+
 deleteFolderCrossPlatform(targetSrc);
 
 await new Promise(res => setTimeout(res, 200));

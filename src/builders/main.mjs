@@ -1,5 +1,5 @@
 //Imports
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 
 //Config
@@ -49,7 +49,7 @@ const template = `
 
 //Helpers
 const shouldUseOriginalMain = originalMain => {
-	return originalMain.includes('loadApp({');
+	return originalMain.includes('loadApp(');
 };
 
 const templatifyOriginalMain = originalMain => {
@@ -114,7 +114,7 @@ const templatifyOriginalMain = originalMain => {
 
 	// 9. Replace the entire loadApp({ ... }); block
 	result = result.replace(
-		/^[ \t]*loadApp\(\s*\{[\s\S]*?^[ \t]*\}\);/m,
+		/^[ \t]*loadApp\([\s\S]*?\);/m,
 		`const themesConfig = $THEMES_CONFIG$;
 
 		const res = await fetch('/app.json')
