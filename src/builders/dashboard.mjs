@@ -3,11 +3,12 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
 //Getters / Setters
+import { setOriginalFile } from './dashboard/originalFile.mjs';
 import { setIsTrait, getIsTrait } from './dashboard/isTrait.mjs';
 import { resetTraitImports } from './dashboard/traitImports.mjs';
 import { resetScriptImports } from './dashboard/scriptImports.mjs';
-import { setIsFunctionalTrait, getIsFunctionalTrait } from './dashboard/isFunctionalTrait.mjs';
 import { resetUsedComponentTypes } from './dashboard/usedComponentTypes.mjs';
+import { setIsFunctionalTrait, getIsFunctionalTrait } from './dashboard/isFunctionalTrait.mjs';
 
 //Helpers
 import templates from './dashboard/templates.mjs';
@@ -24,6 +25,8 @@ const dashboard = ({ path, contents }, mapFiles) => {
 	initGenerateImports({ currentPath: path });
 
 	normalizeTraits(contents);
+
+	setOriginalFile(contents);
 
 	const hasMainTrait = !!identifyMainTrait(contents.traits);
 
@@ -68,85 +71,6 @@ const dashboard = ({ path, contents }, mapFiles) => {
 
 		useMainPrefix = templates.mainPrefixHasMainTrait;
 		onMountMethod = generateTraitOnMount(contents);
-	}
-
-	if (getIsTrait()) {
-		// Replace exact full-string "%key%" values inside JSX/object strings
-		// Example: id="%id%" -> id={traitPrps.id}
-		// Only matches when the entire string is exactly "%key%"
-		Object.keys(contents.acceptPrps).forEach(_k => {
-			const k = (_k.includes(' ') || _k.includes('/')) ? `['${_k}']` : `.${_k}`;
-
-			rootComponent = rootComponent
-				.replaceAll(`'%${_k}%'`, `{traitPrps${k}}`)
-				.replaceAll(`"%${_k}%"`, `traitPrps${k}`)
-				.replaceAll(`"$${_k}$"`, `traitPrps${k}`)
-				.replaceAll(`"%${_k}%"`, `\`traitPrps${k}\``);
-		});
-
-		// Replace any object-style prop values (key: "...") containing %...% tokens
-		// Example: cpt: "Hello %name%" -> cpt: `Hello ${getDeepProperty(traitPrps, 'name')}`
-		// Handles partial strings, multiple tokens, and nested paths like %a.b.c%
-		rootComponent = rootComponent.replace(
-			/:\s*(["'])([^"']*%[^"']+%[^"']*)\1/g,
-			(match, quote, value) => {
-				const interpolated = value
-					.replaceAll('`', '\\`')
-					.replace(/%([A-Za-z0-9][^%]*[A-Za-z0-9])%/g, (_, token) => {
-						return `\${getDeepProperty(traitPrps, '${token}')}`;
-					});
-
-				return `: \`${interpolated}\``;
-			}
-		);
-
-		// Replace any object-style prop values (key: "...") containing $...$ tokens
-		// Example: cpt: "Hello $name$" -> cpt: `Hello ${getDeepProperty(traitPrps, 'name')}`
-		// Same as %...% but for $ tokens, with escaping to prevent premature interpolation
-		rootComponent = rootComponent.replace(
-			/:\s*(["'])([^"']*\$[^"']+\$[^"']*)\1/g,
-			(match, quote, value) => {
-				const interpolated = value
-					.replaceAll('`', '\\`')
-					.replaceAll('${', '\\${')
-					.replace(/\$([A-Za-z0-9](?:[^$]*[A-Za-z0-9])?)\$/g, (_, token) => {
-						return `\${getDeepProperty(traitPrps, '${token}')}`;
-					});
-
-				return `: \`${interpolated}\``;
-			}
-		);
-
-		// Replace any JSX attribute value containing %...% tokens
-		// Example: id="%id%-suffix" -> id={`${getDeepProperty(traitPrps, 'id')}-suffix`}
-		rootComponent = rootComponent.replace(
-			/=\s*(["'])([^"']*%[^"']+%[^"']*)\1/g,
-			(match, quote, value) => {
-				const interpolated = value
-					.replaceAll('`', '\\`')
-					.replace(/%([A-Za-z0-9][^%]*[A-Za-z0-9])%/g, (_, token) => {
-						return `\${getDeepProperty(traitPrps, '${token}')}`;
-					});
-
-				return `={\`${interpolated}\`}`;
-			}
-		);
-
-		// Replace any JSX attribute value containing $...$ tokens
-		// Example: id="$id$-suffix" -> id={`${getDeepProperty(traitPrps, 'id')}-suffix`}
-		rootComponent = rootComponent.replace(
-			/=\s*(["'])([^"']*\$[^"']+\$[^"']*)\1/g,
-			(match, quote, value) => {
-				const interpolated = value
-					.replaceAll('`', '\\`')
-					.replaceAll('${', '\\${')
-					.replace(/\$([A-Za-z0-9](?:[^$]*[A-Za-z0-9])?)\$/g, (_, token) => {
-						return `\${getDeepProperty(traitPrps, '${token}')}`;
-					});
-
-				return `={\`${interpolated}\`}`;
-			}
-		);
 	}
 
 	const transpiled = `

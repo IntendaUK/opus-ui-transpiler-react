@@ -490,8 +490,8 @@ createFiles();
 console.log('Copying Static Files');
 copyStaticFiles();
 
-//console.log('Linting');
-//await runEslintOnOutput();
+console.log('Linting');
+await runEslintOnOutput();
 
 await new Promise(res => setTimeout(res, 200));
 

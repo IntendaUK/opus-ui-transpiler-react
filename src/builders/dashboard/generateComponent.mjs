@@ -6,6 +6,7 @@ import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponent
 //Helpers
 import buildProps from './buildProps.mjs';
 import buildTraitsInfo from './buildTraitsInfo.mjs';
+import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 
 //Export
 const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
@@ -86,10 +87,13 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 				sysPrps.push(`${key}${s}${bl}['${value}', scope]${br}`);
 			else
 				sysPrps.push(`${key}${s}'${value}'`);
-		} else if (value[0] === '%' && value[value.length - 1] === '%' && hasFunctionalTraits)
-			sysPrps.push(`${key}${s}traitPrps.${value.replaceAll('%', '')}`);
-		else
-			sysPrps.push(`${key}${s}'${value}'`);
+		} else {
+			let fixedValue = injectTraitPrpsInString(`"${value}"`);
+			if (!hasFunctionalTraits && (fixedValue.indexOf('traitPrps') === 0 || fixedValue[0] === '`'))
+				sysPrps.push(`${key}${s}{${fixedValue}}`);
+			else
+				sysPrps.push(`${key}${s}${fixedValue}`);
+		}
 	});
 	if (isRootLevel && !obj.scope) {
 		if (!hasFunctionalTraits)

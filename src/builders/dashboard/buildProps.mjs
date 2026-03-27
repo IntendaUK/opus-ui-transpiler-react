@@ -1,11 +1,17 @@
-import findComponentLibraryName from './findComponentLibraryName.mjs';
-import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
+//Getters / Setters
 import { getIsTrait } from './isTrait.mjs';
-import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
-import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
+import { getOriginalFile } from './originalFile.mjs';
 import { pushToScriptImports } from './scriptImports.mjs';
-import buildTraitsInfo from './buildTraitsInfo.mjs';
+import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
+import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
+import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
 
+//Helpers
+import buildTraitsInfo from './buildTraitsInfo.mjs';
+import findComponentLibraryName from './findComponentLibraryName.mjs';
+import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
+
+//Export
 const buildProps = ({
 	prps,
 	isRootLevel,
@@ -60,7 +66,7 @@ const buildProps = ({
 					prps: otherPrps,
 					wrap: false
 				});
-				lines.push(`handler: ${type}.bind(null, { ${scriptPrps} })`);
+				lines.push(`handler: ${type}, ${scriptPrps}`);
 
 				return;
 			}
@@ -155,6 +161,10 @@ const buildProps = ({
 					) + '`';
 				}
 			}
+
+			//Next we need to replace %key%, %key.subKey%, $key$ and $key.subKey$ accessors
+			// with relevant traitPrps accessors
+			value = injectTraitPrpsInString(value);
 		} else if (Array.isArray(v)) {
 			value = `[${buildProps({
 				prps: v,
