@@ -60,7 +60,7 @@ const loadMdaPackage = () => {
 	delete mdaPackage.blueprint;
 
 	const res = JSON.stringify(mdaPackage)
-		.replaceAll('"blueprint":', '"trait":')
+		.replaceAll('"blueprint":', '"wasBlueprint": true, "trait":')
 		.replaceAll('"blueprintPrps":', '"traitPrps":');
 
 	mdaPackage = JSON.parse(res);

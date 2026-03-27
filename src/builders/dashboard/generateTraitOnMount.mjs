@@ -39,9 +39,13 @@ const generateTraitOnMount = ({ acceptPrps }) => {
 		.join('');
 
 	const res = `
-		const setTraitPrps = (traitPrps, setReady) => {
+		const setTraitPrps = (traitPrps, auth, setReady) => {
 		${applyDefaults}
 		${morphers}
+		//Blueprints don't have 'auth' capabilities so they must always override
+		if (!auth?.includes('id') && traitPrps.id !== undefined && !traitPrps.wasBlueprint)
+			traitPrps.id = generateGuid();
+
 		setReady(true);
 	};`;
 

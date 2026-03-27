@@ -5,21 +5,25 @@ const normalizeTraits = (obj, isInTraitsArray = false) => {
 	if (!isInTraitsArray && obj.trait) {
 		obj.traits = [{
 			trait: obj.trait,
-			traitPrps: obj.traitPrps
+			traitPrps: obj.traitPrps,
+			wasBlueprint: obj.wasBlueprint
 		}];
 
 		delete obj.trait;
 		delete obj.traitPrps;
+		delete obj.wasBlueprint;
 	}
 
 	if (!isInTraitsArray && obj.blueprint) {
 		obj.traits = [{
 			trait: obj.blueprint,
-			traitPrps: obj.blueprintPrps
+			traitPrps: obj.blueprintPrps,
+			wasBlueprint: obj.wasBlueprint
 		}];
 
 		delete obj.blueprint;
 		delete obj.blueprintPrps;
+		delete obj.wasBlueprint;
 	}
 
 	Object.entries(obj).forEach(([k, v]) => {

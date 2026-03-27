@@ -10,11 +10,14 @@ const refMap = {};
 		mainTrait: {
 			type,
 			path,
-			traitPrps
+			traitPrps,
+			auth
 		},
 		otherTraits: [{
 			type,
-			path
+			path,
+			traitPrps,
+			auth
 		}],
 		combinedTraitPrps,
 		serializedTraitPrps
@@ -75,11 +78,15 @@ const buildTraitsInfo = ({ traits }) => {
 				traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1)).join('')}</>`;
 		});
 
+		if (trait.wasBlueprint)
+			traitPrps.wasBlueprint = true;
+
 		return {
 			type,
 			path,
 			contents,
-			traitPrps
+			traitPrps,
+			auth: trait.auth
 		};
 	};
 

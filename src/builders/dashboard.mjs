@@ -74,12 +74,14 @@ const dashboard = ({ path, contents }, mapFiles) => {
 		// Replace exact full-string "%key%" values inside JSX/object strings
 		// Example: id="%id%" -> id={traitPrps.id}
 		// Only matches when the entire string is exactly "%key%"
-		Object.keys(contents.acceptPrps).forEach(k => {
+		Object.keys(contents.acceptPrps).forEach(_k => {
+			const k = (_k.includes(' ') || _k.includes('/')) ? `['${_k}']` : `.${_k}`;
+
 			rootComponent = rootComponent
-				.replaceAll(`'%${k}%'`, `{traitPrps.${k}}`)
-				.replaceAll(`"%${k}%"`, `traitPrps.${k}`)
-				.replaceAll(`"$${k}$"`, `traitPrps.${k}`)
-				.replaceAll(`"%${k}%"`, `\`traitPrps.${k}\``);
+				.replaceAll(`'%${_k}%'`, `{traitPrps${k}}`)
+				.replaceAll(`"%${_k}%"`, `traitPrps${k}`)
+				.replaceAll(`"$${_k}$"`, `traitPrps${k}`)
+				.replaceAll(`"%${_k}%"`, `\`traitPrps${k}\``);
 		});
 
 		// Replace any object-style prop values (key: "...") containing %...% tokens

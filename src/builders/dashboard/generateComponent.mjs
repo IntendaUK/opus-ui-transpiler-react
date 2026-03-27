@@ -53,6 +53,9 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 	if (traitsInfo?.mainTrait && !mainTraitPrpsString)
 		mainTraitPrpsString = 'traitPrps={{}}';
 
+	if (traitsInfo?.mainTrait?.auth)
+		mainTraitPrpsString += ` auth={${JSON.stringify(traitsInfo.mainTrait.auth)}}`;
+
 	let children = [];
 	if (Array.isArray(wgts))
 		children = wgts.map(component => generateComponent(component, false, wgts.length === 1));

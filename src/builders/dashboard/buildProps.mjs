@@ -27,7 +27,7 @@ const buildProps = ({
 			return;
 
 		let key = k;
-		if (key[0] === '^' || key[0] === '.' || key.includes('-') || key.includes(' '))
+		if (key[0] === '^' || key[0] === '.' || key.includes('-') || key.includes(' ') || key.includes('/'))
 			key = `"${key}"`;
 
 		let value = JSON.stringify(v);
@@ -129,11 +129,17 @@ const buildProps = ({
 		}
 
 		if (vType === 'string') {
-			if (v[0] === '%' && v[v.length - 1] === '%')
-				value = `traitPrps.${v.replaceAll('%', '').split('.').join('?.')}`;
-			else if (v[0] === '$' && v[v.length - 1] === '$')
-				value = `traitPrps.${v.replaceAll('$', '').split('.').join('?.')}`;
-			else if (v.indexOf('<>') === 0 || k === 'handler' || v.indexOf('(() => {') === 0)
+			if (v[0] === '%' && v[v.length - 1] === '%') {
+				if (v.includes(' ') || v.includes('/') && !v.includes('.'))
+					value = `traitPrps['${v.replaceAll('%', '')}']`;
+				else
+					value = `traitPrps.${v.replaceAll('%', '').split('.').join('?.')}`;
+			} else if (v[0] === '$' && v[v.length - 1] === '$') {
+				if (v.includes(' ') || v.includes('/') && !v.includes('.'))
+					value = `traitPrps['${v.replaceAll('$', '')}']`;
+				else
+					value = `traitPrps.${v.replaceAll('$', '').split('.').join('?.')}`;
+			} else if (v.indexOf('<>') === 0 || k === 'handler' || v.indexOf('(() => {') === 0)
 				value = v;
 
 			//Value will be something like "0 0 {theme.global.padding}"

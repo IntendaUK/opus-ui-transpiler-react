@@ -1,11 +1,11 @@
 const mainPrefix = `
 	import React from 'react';
-	import { ExternalComponent, isConditionMet, getThemeValue, getDeepProperty } from '@intenda/opus-ui';
+	import { ExternalComponent, isConditionMet, getThemeValue, getDeepProperty, generateGuid } from '@intenda/opus-ui';
 `;
 
 const mainPrefixHasMainTrait = `
 	import React, { useEffect, useState } from 'react';
-	import { ExternalComponent, getSyncScriptResult, isConditionMet, getThemeValue, getDeepProperty } from '@intenda/opus-ui';
+	import { ExternalComponent, getSyncScriptResult, isConditionMet, getThemeValue, getDeepProperty, generateGuid } from '@intenda/opus-ui';
 `;
 
 const functionPrefix = `
@@ -17,7 +17,7 @@ const functionPrefixHasMainTrait = `
 	const Component = ({ scope, prps, traitPrps = {}, ...rest }) => {
 		const [ready, setReady] = useState(false);
 
-		useEffect(setTraitPrps.bind(null, traitPrps, setReady), [traitPrps]);
+		useEffect(setTraitPrps.bind(null, traitPrps, rest.auth, setReady), [traitPrps]);
 
 		if (!ready)
 			return null;
