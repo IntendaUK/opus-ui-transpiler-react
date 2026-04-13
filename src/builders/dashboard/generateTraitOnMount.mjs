@@ -1,6 +1,6 @@
 import buildProps from './buildProps.mjs';
 
-const generateTraitOnMount = ({ acceptPrps }) => {
+const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => {
 	const applyDefaults = Object.entries(acceptPrps)
 		.filter(([k, v]) => v.dft !== undefined)
 		.map(([k, v]) => {
@@ -38,13 +38,21 @@ const generateTraitOnMount = ({ acceptPrps }) => {
 		})
 		.join('');
 
+	const rootUsesId =
+		idFromRootComponent?.includes('%id%') ||
+		idFromRootComponent?.includes('$id$');
+
+	const idCondition = rootUsesId
+		? `if (!auth?.includes('id') && traitPrps.id !== undefined && !traitPrps.wasBlueprint)
+			traitPrps.id = generateGuid();`
+		: '';
+
 	const res = `
 		const setTraitPrps = (traitPrps, auth, setReady) => {
 		${applyDefaults}
 		${morphers}
 		//Blueprints don't have 'auth' capabilities so they must always override
-		if (!auth?.includes('id') && traitPrps.id !== undefined && !traitPrps.wasBlueprint)
-			traitPrps.id = generateGuid();
+		${idCondition}
 
 		setReady(true);
 	};`;

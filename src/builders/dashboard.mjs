@@ -70,7 +70,7 @@ const dashboard = ({ path, contents }, mapFiles) => {
 			contents.acceptPrps = {};
 
 		useMainPrefix = templates.mainPrefixHasMainTrait;
-		onMountMethod = generateTraitOnMount(contents);
+		onMountMethod = generateTraitOnMount(contents, path);
 	}
 
 	const transpiled = `
