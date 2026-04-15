@@ -5,11 +5,17 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 		.filter(([k, v]) => v.dft !== undefined)
 		.map(([k, v]) => {
 			if (!v.internal) {
-				return `
+				let defaulter = `
 					if (traitPrps.${k} === undefined) {
 						traitPrps.${k} = ${JSON.stringify(v.dft, null, '\t')};
 					}
 				`;
+
+				Object.entries(acceptPrps).forEach(([k, v]) => {
+					defaulter = defaulter.replaceAll(`"%${k}%"`, `traitPrps.${k}`);
+				});
+
+				return defaulter;
 			}
 
 			return `traitPrps.${k} = ${JSON.stringify(v.dft, null, '\t')};`;

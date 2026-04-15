@@ -97,7 +97,7 @@ const buildProps = ({
 				return;
 			}
 		} else if (isInRowMda && k === 'traits') {
-			const traitsInfo = buildTraitsInfo(prps);
+			const traitsInfo = buildTraitsInfo(prps, { isInRowMda });
 
 			if (traitsInfo.mainTrait) {
 				const { type, path } = traitsInfo.mainTrait;

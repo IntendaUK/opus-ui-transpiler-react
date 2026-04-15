@@ -1,6 +1,15 @@
-const normalizeTraits = (obj, isInTraitsArray = false) => {
+const normalizeTraits = (obj, isInTraitsArray = false, isRoot = true) => {
 	if (typeof(obj) !== 'object' || obj === null)
 		return;
+
+	//For root objects that include %...% or $...$ somewhere, add acceptPrps if not present
+	if (isRoot && !obj.acceptPrps) {
+		const raw = JSON.stringify(obj);
+		const hasToken = /(%[A-Za-z0-9.-]+%|\$[A-Za-z0-9.-]+\$)/.test(raw);
+
+		if (hasToken)
+			obj.acceptPrps = {};
+	}
 
 	if (!isInTraitsArray && obj.trait) {
 		obj.traits = [{
@@ -28,13 +37,13 @@ const normalizeTraits = (obj, isInTraitsArray = false) => {
 
 	Object.entries(obj).forEach(([k, v]) => {
 		if (Array.isArray(v)) {
-			v.forEach(item => normalizeTraits(item, k === 'traits'));
+			v.forEach(item => normalizeTraits(item, k === 'traits', false));
 
 			return;
 		}
 
 		if (typeof(v) === 'object' && v !== null)
-			normalizeTraits(v, false);
+			normalizeTraits(v, false, false);
 	});
 };
 

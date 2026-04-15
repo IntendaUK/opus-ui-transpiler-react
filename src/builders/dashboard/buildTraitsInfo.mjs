@@ -23,7 +23,7 @@ const refMap = {};
 		serializedTraitPrps
 	}
 */
-const buildTraitsInfo = ({ traits }) => {
+const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 	if (!traits?.length)
 		return;
 
@@ -73,10 +73,13 @@ const buildTraitsInfo = ({ traits }) => {
 		const traitPrps = { ...trait.traitPrps };
 		const stringifiedContents = JSON.stringify(contents);
 
-		Object.entries(traitPrps).forEach(([k, v]) => {
-			if (stringifiedContents.includes(`"wgts":"$${k}$"`) && v.map)
-				traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1)).join('')}</>`;
-		});
+		//Can't have jsx inside rowMda: { ... }
+		if (!isInRowMda) {
+			Object.entries(traitPrps).forEach(([k, v]) => {
+				if (stringifiedContents.includes(`"wgts":"$${k}$"`) && v.map)
+					traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1)).join('')}</>`;
+			});
+		}
 
 		if (trait.wasBlueprint)
 			traitPrps.wasBlueprint = true;

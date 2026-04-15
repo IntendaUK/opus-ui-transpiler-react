@@ -1,4 +1,5 @@
 import { getMapFilesEntry } from './mapFiles.mjs';
+import normalizeTraits from './normalizeTraits.mjs';
 
 const identifyMainTrait = traits => {
 	if (!traits || typeof(traits) === 'string')
@@ -12,6 +13,7 @@ const identifyMainTrait = traits => {
 
 		const traitPath = `dashboard/${f.trait ?? f}.json`;
 		const trait = getMapFilesEntry(traitPath);
+		normalizeTraits(trait);
 
 		if (!trait)
 			return;

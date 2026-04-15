@@ -14,7 +14,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 
 	let componentType;
 
-	const traitsInfo = buildTraitsInfo(obj);
+	const traitsInfo = buildTraitsInfo(obj, { isInRowMda: false });
 	const hasFunctionalTraits = traitsInfo?.otherTraits.length > 0;
 
 	if (hasFunctionalTraits)
