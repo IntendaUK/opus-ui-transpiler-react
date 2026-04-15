@@ -130,6 +130,9 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 				wrap: false
 			});
 
+			if (conditionString.includes('{{state.editProject.allDataForViewProject.closedby}}'))
+				console.log(isOnlyChild);
+
 			res = `isConditionMet({${conditionString}}) ? ${inner} : null`;
 
 			if (!isOnlyChild)

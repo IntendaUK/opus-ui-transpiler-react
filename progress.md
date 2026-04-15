@@ -17,13 +17,13 @@
 
 # Broken in bridge
 * MDM / Saving on the 'edit detail modal' on quotes
-* MDM / Debtors crashes
+* MDM / Debtor view modal doesn't show data
 * MDM / View Division doesn't show data in the form
 * MDM / GL Account View details doesn't show data in the form
 * MDM / Hauler management crashes
 * MDM / Saving on invoice template type crashes
 * MDM / SBO Group Code crashes
-* MDM / Suppliers crashes
+* MDM / Suppliers / View modal doesn't show data
 * Workflow / All 9 Dashboards / Duplicate id errors
 * Forwarding / Journals / Crash
 * Forwarding / Projects / Crash
