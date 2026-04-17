@@ -130,7 +130,8 @@ const createFiles = () => {
 const runEslintOnOutput = async () => {
 	const eslint = new ESLint({
 		fix: true,
-		concurrency: 'auto'
+		concurrency: 30
+		//concurrency: 'auto'
 	});
 
 	const results = await eslint.lintFiles(['output/src/**/*.{js,jsx}']);

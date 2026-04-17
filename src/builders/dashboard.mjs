@@ -14,6 +14,7 @@ import { setIsFunctionalTrait, getIsFunctionalTrait } from './dashboard/isFuncti
 import templates from './dashboard/templates.mjs';
 import { initMapFiles } from './dashboard/mapFiles.mjs';
 import normalizeTraits from './dashboard/normalizeTraits.mjs';
+import buildSpreadTrait from './dashboard/buildSpreadTrait.mjs';
 import generateComponent from './dashboard/generateComponent.mjs';
 import identifyMainTrait from './dashboard/identifyMainTrait.mjs';
 import generateTraitOnMount from './dashboard/generateTraitOnMount.mjs';
@@ -21,6 +22,16 @@ import generateImports, { initGenerateImports } from './dashboard/generateImport
 
 //Export
 const dashboard = ({ path, contents }, mapFiles) => {
+	//if (path.includes('actionButtonsFireScript') && path.includes('sboGroupCode')) {
+	if (contents.traitArray) {
+		buildSpreadTrait({
+			path,
+			contents
+		});
+
+		return;
+	}
+
 	initMapFiles(mapFiles);
 	initGenerateImports({ currentPath: path });
 
