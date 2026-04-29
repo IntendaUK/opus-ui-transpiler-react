@@ -3,11 +3,12 @@ const normalizeTraits = (obj, isInTraitsArray = false, isRoot = true) => {
 		return;
 
 	//For root objects that include %...% or $...$ somewhere, add acceptPrps if not present
+	//This is hacky but we do need to figure out if the file has a missing acceptPrps
 	if (isRoot && !obj.acceptPrps) {
 		const raw = JSON.stringify(obj);
 		const hasToken = /(%[A-Za-z0-9.-]+%|\$[A-Za-z0-9.-]+\$)/.test(raw);
 
-		if (hasToken)
+		if (hasToken || !obj.type && !obj.traits)
 			obj.acceptPrps = {};
 	}
 

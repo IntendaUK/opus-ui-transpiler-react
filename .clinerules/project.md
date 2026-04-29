@@ -1,0 +1,3 @@
+- This project is a transpiler
+- It converts opus ui json files into react files that use opus ui as a library
+- The transpiler recurses over all json files in sourceApplicationFolder, transpiles them and puts the resulting app in targetApplicationFolder
