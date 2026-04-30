@@ -28,7 +28,17 @@ const functionPrefixHasMainTrait = `
 const functionPrefixFunctionalTrait = `
 	/* eslint-disable */
 
-	const FunctionalTrait = traitPrps => { return { 
+	const FunctionalTrait = (traitPrps = {}) => {
+		const functionalTraitDefaults = __FUNCTIONAL_TRAIT_DEFAULTS__;
+
+		traitPrps = { ...traitPrps };
+
+		Object.entries(functionalTraitDefaults).forEach(([key, value]) => {
+			if (traitPrps[key] === undefined)
+				traitPrps[key] = value;
+		});
+
+		return {
 `;
 
 const functionSuffix = `

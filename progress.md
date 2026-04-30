@@ -15,18 +15,3 @@
 # Limitations
 1. extraWgts are still rendered as JSON
 
-# Modals not showing data
-* MDM / Debtor view modal
-* MDM / GL Account view modal
-
-# Scripts crashing
-* MDM / Invoice Template Type save
-
-# Dashboards hard crashing
-* Terminals / InSights Mobile Reports / Crash
-* Terminals / Project Schedule / Crash
-* Terminals / Warehouse Schedule / Crash
-* Terminals / Transit Schedule / Crash
-
-
-# Crashes on bridge

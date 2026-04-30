@@ -13,11 +13,17 @@ const normalizeTraits = (obj, isInTraitsArray = false, isRoot = true) => {
 	}
 
 	if (!isInTraitsArray && obj.trait) {
-		obj.traits = [{
+		//If the component had a blueprint and traits before (blueprint would have been changed to trait)
+		// we need to ensure we don't throw the old traits away
+
+		if (!obj.traits)
+			obj.traits = [];
+
+		obj.traits.push({
 			trait: obj.trait,
 			traitPrps: obj.traitPrps,
 			wasBlueprint: obj.wasBlueprint
-		}];
+		});
 
 		delete obj.trait;
 		delete obj.traitPrps;
@@ -25,11 +31,14 @@ const normalizeTraits = (obj, isInTraitsArray = false, isRoot = true) => {
 	}
 
 	if (!isInTraitsArray && obj.blueprint) {
-		obj.traits = [{
+		if (!obj.traits)
+			obj.traits = [];
+
+		obj.traits.push({
 			trait: obj.blueprint,
 			traitPrps: obj.blueprintPrps,
 			wasBlueprint: obj.wasBlueprint
-		}];
+		});
 
 		delete obj.blueprint;
 		delete obj.blueprintPrps;

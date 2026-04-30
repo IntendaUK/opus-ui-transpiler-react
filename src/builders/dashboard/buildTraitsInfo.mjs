@@ -5,6 +5,24 @@ import generateComponent from './generateComponent.mjs';
 
 const refMap = {};
 
+// Recursively checks if a wgts token like "$key$" exists anywhere in the object,
+// but explicitly ignores anything inside a `popoverMda` branch.
+// As soon as `popoverMda` is encountered, that subtree is skipped entirely.
+const hasWgtsTokenOutsidePopover = (node, key) => {
+	if (!node || typeof node !== 'object')
+		return false;
+
+	if (node.wgts === `$${key}$`)
+		return true;
+
+	return Object.entries(node).some(([k, v]) => {
+		if (k === 'popoverMda')
+			return false;
+
+		return hasWgtsTokenOutsidePopover(v, key);
+	});
+};
+
 /*
 	Returns {
 		mainTrait: {
@@ -71,12 +89,11 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 		}
 
 		const traitPrps = { ...trait.traitPrps };
-		const stringifiedContents = JSON.stringify(contents);
 
 		//Can't have jsx inside rowMda: { ... }
 		if (!isInRowMda) {
 			Object.entries(traitPrps).forEach(([k, v]) => {
-				if (stringifiedContents.includes(`"wgts":"$${k}$"`) && v.map)
+				if (v.map && hasWgtsTokenOutsidePopover(contents, k))
 					traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1)).join('')}</>`;
 			});
 		}

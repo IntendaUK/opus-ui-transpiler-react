@@ -8,6 +8,29 @@ import buildProps from './buildProps.mjs';
 import buildTraitsInfo from './buildTraitsInfo.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 
+const containsGeneratedJsx = value => {
+	if (typeof(value) === 'string')
+		return value.indexOf('<>') === 0;
+
+	if (Array.isArray(value))
+		return value.some(containsGeneratedJsx);
+
+	if (typeof(value) === 'object' && value !== null)
+		return Object.values(value).some(containsGeneratedJsx);
+
+	return false;
+};
+
+const buildFunctionalTraitPrps = traitPrps => {
+	if (!containsGeneratedJsx(traitPrps))
+		return JSON.stringify(traitPrps);
+
+	return `{${buildProps({
+		prps: traitPrps,
+		wrap: false
+	})}}`;
+};
+
 //Export
 const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 	let { type, prps, wgts, condition } = obj;
@@ -112,7 +135,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 
 	if (hasFunctionalTraits) {
 		traitsString = `
-			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${traitsInfo.otherTraits.map(t => `${t.type}(${JSON.stringify(t.traitPrps)})`).join(',')}] }) }
+			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${traitsInfo.otherTraits.map(t => `${t.type}(${buildFunctionalTraitPrps(t.traitPrps)})`).join(',')}] }) }
 		`;
 
 		sysPrpsString = '';

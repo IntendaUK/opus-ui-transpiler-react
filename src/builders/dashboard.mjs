@@ -20,6 +20,14 @@ import identifyMainTrait from './dashboard/identifyMainTrait.mjs';
 import generateTraitOnMount from './dashboard/generateTraitOnMount.mjs';
 import generateImports, { initGenerateImports } from './dashboard/generateImports.mjs';
 
+const buildFunctionalTraitDefaults = acceptPrps => {
+	return Object.fromEntries(
+		Object.entries(acceptPrps ?? {})
+			.filter(([, spec]) => spec && Object.prototype.hasOwnProperty.call(spec, 'dft'))
+			.map(([key, spec]) => [key, spec.dft])
+	);
+};
+
 //Export
 const dashboard = ({ path, contents }, mapFiles) => {
 	//if (path.includes('actionButtonsFireScript') && path.includes('sboGroupCode')) {
@@ -63,7 +71,10 @@ const dashboard = ({ path, contents }, mapFiles) => {
 			usePrefix = templates.functionPrefixHasMainTrait;
 			useSuffix = templates.functionSuffixHasMainTrait;
 		} else {
-			usePrefix = templates.functionPrefixFunctionalTrait;
+			usePrefix = templates.functionPrefixFunctionalTrait.replace(
+				'__FUNCTIONAL_TRAIT_DEFAULTS__',
+				JSON.stringify(buildFunctionalTraitDefaults(contents.acceptPrps))
+			);
 			useSuffix = templates.functionSuffixFunctionalTrait;
 		}
 	}
