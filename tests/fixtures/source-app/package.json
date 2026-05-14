@@ -3,7 +3,7 @@
 	"version": "1.0.0",
 	"private": true,
 	"scripts": {
-		"build-json": "node ../../../node_modules/@intenda/opus-ui-packager/src/packager.js"
+		"build-json": "node ../../../node_modules/@intenda/opus-ui-packager/src/packager.js --excludeEnsembles=true"
 	},
 	"opusPackagerConfig": {
 		"appDir": "app",
