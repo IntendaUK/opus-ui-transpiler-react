@@ -40,7 +40,7 @@ const runBuildJsonInSourceApp = () => {
 		// run-script works everywhere, but Windows sometimes needs shell:true
 		execSync('npm run-script build-json', {
 			cwd,
-			stdio: 'ignore',
+			stdio: 'inherit',
 			shell: process.platform === 'win32'
 		});
 	} catch (err) {
