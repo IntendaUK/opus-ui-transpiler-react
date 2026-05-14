@@ -1,0 +1,9 @@
+{
+	"type": "label",
+	"acceptPrps": {
+		"label": "string"
+	},
+	"prps": {
+		"cpt": "%label%"
+	}
+}

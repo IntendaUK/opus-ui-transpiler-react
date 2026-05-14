@@ -8,6 +8,7 @@ import { setIsTrait, getIsTrait } from './dashboard/isTrait.mjs';
 import { resetTraitImports } from './dashboard/traitImports.mjs';
 import { resetScriptImports } from './dashboard/scriptImports.mjs';
 import { resetUsedComponentTypes } from './dashboard/usedComponentTypes.mjs';
+import { initDynamicRootTypes } from './dashboard/dynamicRootTypes.mjs';
 import { setIsFunctionalTrait, getIsFunctionalTrait } from './dashboard/isFunctionalTrait.mjs';
 
 //Helpers
@@ -16,6 +17,7 @@ import { initMapFiles } from './dashboard/mapFiles.mjs';
 import normalizeTraits from './dashboard/normalizeTraits.mjs';
 import buildSpreadTrait from './dashboard/buildSpreadTrait.mjs';
 import generateComponent from './dashboard/generateComponent.mjs';
+import generatePrefix from './dashboard/generatePrefix.mjs';
 import identifyMainTrait from './dashboard/identifyMainTrait.mjs';
 import generateTraitOnMount from './dashboard/generateTraitOnMount.mjs';
 import generateImports, { initGenerateImports } from './dashboard/generateImports.mjs';
@@ -29,7 +31,7 @@ const buildFunctionalTraitDefaults = acceptPrps => {
 };
 
 //Export
-const dashboard = ({ path, contents }, mapFiles) => {
+const dashboard = ({ path, contents }, mapFiles, dynamicRootTypes) => {
 	//if (path.includes('actionButtonsFireScript') && path.includes('sboGroupCode')) {
 	if (contents.traitArray) {
 		buildSpreadTrait({
@@ -42,6 +44,7 @@ const dashboard = ({ path, contents }, mapFiles) => {
 
 	initMapFiles(mapFiles);
 	initGenerateImports({ currentPath: path });
+	initDynamicRootTypes({ currentPath: path, dynamicRootTypes });
 
 	normalizeTraits(contents);
 
@@ -95,9 +98,7 @@ const dashboard = ({ path, contents }, mapFiles) => {
 		onMountMethod = generateTraitOnMount(contents, path);
 	}
 
-	const transpiled = `
-		${useMainPrefix}
-
+	const output = `
 		${onMountMethod}
 
 		${generateImports()}
@@ -105,6 +106,12 @@ const dashboard = ({ path, contents }, mapFiles) => {
 		${usePrefix}
 		${rootComponent}
 		${useSuffix}
+	`;
+
+	const transpiled = `
+		${generatePrefix(useMainPrefix, output)}
+
+		${output}
 	`;
 
 	writeFileSync(outputPath, transpiled, 'utf8');

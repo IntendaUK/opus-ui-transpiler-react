@@ -1,0 +1,6 @@
+{
+	"startup": "sampleDashboard",
+	"themes": [
+		"colors"
+	]
+}

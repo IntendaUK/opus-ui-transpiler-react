@@ -1,0 +1,13 @@
+{
+	"acceptPrps": {
+		"contentItems": "array",
+		"popoverItems": "array"
+	},
+	"prps": {
+		"wgts": "$contentItems$",
+		"popoverMda": {
+			"type": "container",
+			"wgts": "$popoverItems$"
+		}
+	}
+}

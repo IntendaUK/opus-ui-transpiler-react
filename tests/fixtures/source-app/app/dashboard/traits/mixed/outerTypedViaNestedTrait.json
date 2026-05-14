@@ -1,0 +1,13 @@
+{
+	"acceptPrps": {
+		"mixedCaption": "string"
+	},
+	"traits": [
+		{
+			"trait": "traits/mixed/innerTypedTrait",
+			"traitPrps": {
+				"mixedCaption": "%mixedCaption%"
+			}
+		}
+	]
+}

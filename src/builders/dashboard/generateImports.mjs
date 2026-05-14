@@ -2,6 +2,7 @@
 import { getUsedComponentTypes } from './usedComponentTypes.mjs';
 import { getScriptImports } from './scriptImports.mjs';
 import { getTraitImports } from './traitImports.mjs';
+import { getDynamicRootTypeComponentMaps } from './dynamicRootTypes.mjs';
 
 //Helpers
 import findComponentLibraryName from './findComponentLibraryName.mjs';
@@ -11,6 +12,7 @@ import findComponentLibraryName from './findComponentLibraryName.mjs';
 //Helpers
 let currentPath;
 let needsHelpers = false;
+let needsDynamicTraitResolver = false;
 
 const getRelativeImportPath = (currentPath, targetPath) => {
 	const currentParts = currentPath.split('/');
@@ -39,10 +41,15 @@ const getRelativeImportPath = (currentPath, targetPath) => {
 export const initGenerateImports = ({ currentPath: _currentPath }) => {
 	currentPath = _currentPath;
 	needsHelpers = false;
+	needsDynamicTraitResolver = false;
 };
 
 export const setNeedsHelpers = _needsHelpers => {
 	needsHelpers = _needsHelpers;
+};
+
+export const setNeedsDynamicTraitResolver = _needsDynamicTraitResolver => {
+	needsDynamicTraitResolver = _needsDynamicTraitResolver;
 };
 
 const generateImports = () => {
@@ -79,6 +86,20 @@ const generateImports = () => {
 
 		res.push(`import { applyTraits } from '${relativePath}';`);
 	}
+
+	if (needsDynamicTraitResolver) {
+		const relativePath = getRelativeImportPath(currentPath, 'dynamicTraits');
+
+		res.push(`import { resolveDynamicTrait } from '${relativePath}';`);
+	}
+
+	getDynamicRootTypeComponentMaps().forEach(({ name, values }) => {
+		const entries = values
+			.map(type => `${JSON.stringify(type)}: ${type[0].toUpperCase() + type.substring(1)}`)
+			.join(', ');
+
+		res.push(`const ${name} = { ${entries} };`);
+	});
 
 	return res.join('');
 };

@@ -1,0 +1,14 @@
+{
+	"id": "token-%id%-suffix",
+	"type": "label",
+	"acceptPrps": {
+		"id": "string",
+		"caption": "string",
+		"color": "string",
+		"details": "object"
+	},
+	"prps": {
+		"cpt": "Hello %caption% from $details.name$",
+		"color": "$color$"
+	}
+}

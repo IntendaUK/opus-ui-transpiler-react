@@ -1,0 +1,323 @@
+{
+	"id": "sampleDashboard",
+	"type": "container",
+	"prps": {
+		"singlePage": true,
+		"scps": [
+			{
+				"actions": [
+					{
+						"type": "showNotification",
+						"msgType": "info",
+						"msg": "Hello fixture"
+					}
+				]
+			}
+		]
+	},
+	"wgts": [
+		{
+			"id": "sampleLabel",
+			"type": "label",
+			"prps": {
+				"cpt": "Hello fixture",
+				"color": "primary"
+			}
+		},
+		{
+			"id": "nestedTraitLabel",
+			"traits": [
+				{
+					"trait": "traits/nested/outerTrait",
+					"traitPrps": {
+						"label": "Nested trait caption"
+					}
+				}
+			]
+		},
+		{
+			"id": "tokenizedIdTraitUsage",
+			"traits": [
+				{
+					"trait": "traits/id/tokenizedIdTrait",
+					"traitPrps": {
+						"id": "tokenizedProvidedId",
+						"caption": "Tokenized id trait"
+					}
+				}
+			]
+		},
+		{
+			"id": "staticIdTraitUsage",
+			"traits": [
+				{
+					"trait": "traits/id/staticIdTrait",
+					"traitPrps": {
+						"id": "staticProvidedId",
+						"caption": "Static id trait"
+					}
+				}
+			]
+		},
+		{
+			"id": "targetedTokenTraitUsage",
+			"traits": [
+				{
+					"trait": "traits/tokens/targetedTokenTrait",
+					"traitPrps": {
+						"id": "targetedId",
+						"caption": "Targeted token caption",
+						"color": "primary",
+						"details": {
+							"name": "Nested token source"
+						}
+					}
+				}
+			]
+		},
+		{
+			"id": "oddPropNamesTraitUsage",
+			"traits": [
+				{
+					"trait": "traits/tokens/oddPropNamesTrait",
+					"traitPrps": {
+						"field/name": "oddFieldId",
+						"display label": "Odd prop names label"
+					}
+				}
+			]
+		},
+		{
+			"id": "tokenizedScopeTraitUsage",
+			"traits": [
+				{
+					"trait": "traits/tokens/tokenizedScopeTrait",
+					"traitPrps": {
+						"scope": "providedScope",
+						"caption": "Tokenized scope caption"
+					}
+				}
+			]
+		},
+		{
+			"id": "rowMdaRepeater",
+			"type": "repeater",
+			"prps": {
+				"staticData": [
+					{
+						"caption": "Row one"
+					}
+				],
+				"rowMda": {
+					"id": "row-((rowNumber))",
+					"traits": [
+						{
+							"trait": "traits/row/rowMainTrait",
+							"traitPrps": {
+								"rowCaption": "((rowData.caption))"
+							}
+						},
+						{
+							"trait": "traits/row/rowFunctionalTrait",
+							"traitPrps": {
+								"rowColor": "primary"
+							}
+						},
+						{
+							"trait": "traits/row/rowArrayFunctionalTrait",
+							"traitPrps": {
+								"rowItems": [
+									{
+										"type": "label",
+										"prps": {
+											"cpt": "Row metadata item"
+										}
+									}
+								]
+							}
+						}
+					]
+				}
+			}
+		},
+		{
+			"id": "mixedTraitComponent",
+			"traits": [
+				{
+					"trait": "traits/mixed/functionalTrait",
+					"traitPrps": {
+						"mixedColor": "primary"
+					}
+				},
+				{
+					"trait": "traits/mixed/outerTypedViaNestedTrait",
+					"traitPrps": {
+						"mixedCaption": "Mixed nested typed trait"
+					}
+				}
+			]
+		},
+		{
+			"id": "popoverFunctionalTraitComponent",
+			"type": "container",
+			"traits": [
+				{
+					"trait": "traits/popover/popoverFunctionalTrait",
+					"traitPrps": {
+						"contentItems": [
+							{
+								"type": "label",
+								"prps": {
+									"cpt": "Visible content item"
+								}
+							}
+						],
+						"popoverItems": [
+							{
+								"type": "label",
+								"prps": {
+									"cpt": "Popover-only item"
+								}
+							}
+						]
+					}
+				}
+			]
+		},
+		{
+			"id": "tokenlessFunctionalTraitComponent",
+			"type": "label",
+			"prps": {
+				"cpt": "Tokenless functional trait target"
+			},
+			"traits": [
+				{
+					"trait": "traits/static/staticFunctionalTrait"
+				}
+			]
+		},
+		{
+			"id": "dynamicTraitComponent",
+			"traits": [
+				{
+					"trait": "traits/dynamic/containerTrait",
+					"traitPrps": {
+						"dynamicTrait": "traits/dynamic/dataTrait"
+					}
+				}
+			]
+		},
+		{
+			"id": "dynamicTraitArrayComponent",
+			"traits": [
+				{
+					"trait": "traits/dynamic/arrayContainerTrait",
+					"traitPrps": {
+						"traits": [
+							{
+								"trait": "traits/dynamic/dataTrait",
+								"traitPrps": {
+									"source": "first"
+								}
+							},
+							"traits/static/staticFunctionalTrait"
+						]
+					}
+				}
+			]
+		},
+		{
+			"id": "singleConditionalChildContainer",
+			"type": "container",
+			"wgts": [
+				{
+					"id": "singleConditionalChild",
+					"type": "label",
+					"condition": {
+						"value": true
+					},
+					"prps": {
+						"cpt": "Only conditional child"
+					}
+				}
+			]
+		},
+		{
+			"id": "complexRowMdaRepeater",
+			"type": "repeater",
+			"prps": {
+				"staticData": [
+					{
+						"id": 1,
+						"details": [
+							{
+								"description": "Nested row"
+							}
+						]
+					}
+				],
+				"rowMda": {
+					"type": "containerSimple",
+					"rowPrps": {
+						"storeRowDataAs": "rowData",
+						"elementIdFormat": "((parentId))-((rowData.id))"
+					},
+					"prps": {
+						"dir": "vertical"
+					},
+					"wgts": [
+						{
+							"type": "container",
+							"prps": {
+								"dir": "horizontal"
+							},
+							"wgts": [
+								{
+									"type": "label",
+									"prps": {
+										"cpt": "((rowData.id))"
+									}
+								},
+								{
+									"type": "repeater",
+									"prps": {
+										"staticData": "{{rowData.details}}",
+										"rowMda": {
+											"type": "container",
+											"rowPrps": {
+												"storeRowDataAs": "detailRow",
+												"elementIdFormat": "((parentId))-((rowNumber))"
+											},
+											"prps": {},
+											"wgts": [
+												{
+													"type": "label",
+													"prps": {
+														"cpt": "((detailRow.description))"
+													}
+												},
+												{
+													"traits": [
+														{
+															"trait": "traits/row/rowFunctionalTrait",
+															"traitPrps": {
+																"rowColor": "primary"
+															}
+														}
+													],
+													"prps": {
+														"flex": true
+													}
+												}
+											]
+										}
+									}
+								}
+							]
+						}
+					]
+				}
+			}
+		}
+	]
+}

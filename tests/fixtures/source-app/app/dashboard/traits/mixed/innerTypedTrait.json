@@ -1,0 +1,9 @@
+{
+	"type": "label",
+	"acceptPrps": {
+		"mixedCaption": "string"
+	},
+	"prps": {
+		"cpt": "%mixedCaption%"
+	}
+}

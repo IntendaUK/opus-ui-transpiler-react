@@ -2,8 +2,19 @@ import { getMapFilesEntry } from './mapFiles.mjs';
 import identifyMainTrait from './identifyMainTrait.mjs';
 import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
 import generateComponent from './generateComponent.mjs';
+import pathToIdentifier from '../pathToIdentifier.mjs';
+import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
 
 const refMap = {};
+
+const isDynamicTraitPath = path => path.includes('$') || path.includes('%');
+
+const buildTraitAccessor = trait => {
+	const rawTrait = trait.trait ?? trait;
+	const token = rawTrait.replaceAll('%', '').replaceAll('$', '');
+
+	return buildTraitPrpsAccessor(token);
+};
 
 // Recursively checks if a wgts token like "$key$" exists anywhere in the object,
 // but explicitly ignores anything inside a `popoverMda` branch.
@@ -51,14 +62,32 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 		combinedPrps: {}
 	};
 
+	if (typeof(traits) === 'string') {
+		if (!isDynamicTraitPath(traits))
+			return;
+
+		res.otherTraits = [{
+			isDynamicArray: true,
+			expression: buildTraitAccessor(traits)
+		}];
+
+		return res;
+	}
+
 	res.mainTrait = identifyMainTrait(traits);
 
 	res.otherTraits = [...traits].filter(f => f !== res.mainTrait);
 
 	const getInfoFromTrait = trait => {
 		const path = `dashboard/${trait.trait ?? trait}`;
-		if (path.includes('$') || path.includes('%'))
-			return;
+		if (isDynamicTraitPath(path)) {
+			return {
+				isDynamic: true,
+				expression: buildTraitAccessor(trait),
+				traitPrps: { ...trait.traitPrps },
+				auth: trait.auth
+			};
+		}
 
 		const loadedTrait = getMapFilesEntry(`${path}.json`);
 
@@ -67,12 +96,7 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 
 		const { contents } = loadedTrait;
 
-		const type = path
-			.replace('@', '')
-			.replace('dashboard/', '')
-			.split('/')
-			.map((t, i) => t[0].toUpperCase() + t.substring(1))
-			.join('');
+		const type = pathToIdentifier(path);
 
 		if (!contents.type) {
 			if (!refMap[type])
@@ -93,7 +117,7 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 		//Can't have jsx inside rowMda: { ... }
 		if (!isInRowMda) {
 			Object.entries(traitPrps).forEach(([k, v]) => {
-				if (v.map && hasWgtsTokenOutsidePopover(contents, k))
+				if (v?.map && hasWgtsTokenOutsidePopover(contents, k))
 					traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1)).join('')}</>`;
 			});
 		}
@@ -118,6 +142,9 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 		.filter(f => !!f);
 
 	res.otherTraits.forEach(({ contents }) => {
+		if (!contents)
+			return;
+
 		Object.assign(res.combinedPrps, contents.prps);
 	});
 

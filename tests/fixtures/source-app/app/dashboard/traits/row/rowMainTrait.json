@@ -1,0 +1,17 @@
+{
+	"type": "container",
+	"acceptPrps": {
+		"rowCaption": "string"
+	},
+	"prps": {
+		"padding": true
+	},
+	"wgts": [
+		{
+			"type": "label",
+			"prps": {
+				"cpt": "%rowCaption%"
+			}
+		}
+	]
+}

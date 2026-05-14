@@ -1,0 +1,8 @@
+{
+	"acceptPrps": {
+		"mixedColor": "string"
+	},
+	"prps": {
+		"color": "%mixedColor%"
+	}
+}

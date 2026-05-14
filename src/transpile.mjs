@@ -4,18 +4,21 @@ import { join, resolve, dirname } from 'path';
 import { ESLint } from 'eslint';
 import { execSync } from 'child_process';
 
-import { sourceApplicationFolder, targetApplicationFolder, replaceMainJsx } from './config.mjs';
+import { sourceApplicationFolder, targetApplicationFolder, replaceMainJsx, replacePublicFolder, preservedSrcFolders } from './config.mjs';
 
 import buildMain from './builders/main.mjs';
 import buildTheme from './builders/theme.mjs';
 import buildHelpers from './builders/helpers.mjs';
 import buildDashboard from './builders/dashboard.mjs';
+import buildDynamicTraits from './builders/dynamicTraits.mjs';
 import buildScriptAction from './builders/scriptAction.mjs';
 import buildSrcFoldersAndFiles from './builders/srcFoldersAndFiles.mjs';
+import analyzeDynamicRootTypes from './builders/dashboard/analyzeDynamicRootTypes.mjs';
 
 let mdaPackage;
 const mapFiles = new Map();
 const themeNames = [];
+let dynamicRootTypes = new Map();
 
 const setup = () => {
 	const outputPath = join(process.cwd(), 'output', 'src');
@@ -102,7 +105,7 @@ const createFile = entry => {
 
 		themeNames.push(path.split('/').pop().replace('.json', ''));
 	} else
-		buildDashboard(entry, mapFiles);
+		buildDashboard(entry, mapFiles, dynamicRootTypes);
 };
 
 const createFiles = () => {
@@ -110,6 +113,7 @@ const createFiles = () => {
 	const { contents: { startup: startupPath } } = mapFiles.get('dashboard/index.json');
 
 	buildHelpers();
+	buildDynamicTraits(mapFiles);
 
 	mapFiles.delete('dashboard/contentsIndex.json');
 
@@ -147,7 +151,71 @@ const runEslintOnOutput = async () => {
 	//console.log(resultText);
 };
 
-const deleteFolderCrossPlatform = folderPath => {
+const normalizeRelativePath = path => path.replaceAll('\\', '/');
+
+const isSameOrWithinPath = (path, preservedPath) => path === preservedPath || path.startsWith(`${preservedPath}/`);
+
+const shouldPreserveRelativePath = (relativePath, preservedPaths) => {
+	const normalizedPath = normalizeRelativePath(relativePath);
+
+	return preservedPaths.some(preservedPath => isSameOrWithinPath(normalizedPath, preservedPath) || isSameOrWithinPath(preservedPath, normalizedPath));
+};
+
+const copyFolderContentsRecursive = (sourceFolder, destinationFolder, {
+	deleteExtra = false,
+	preservedPaths = []
+} = {}) => {
+	if (!existsSync(sourceFolder))
+		return;
+
+	mkdirSync(destinationFolder, { recursive: true });
+
+	if (deleteExtra && existsSync(destinationFolder)) {
+		const sourceNames = new Set(readdirSync(sourceFolder));
+
+		readdirSync(destinationFolder).forEach(name => {
+			if (sourceNames.has(name))
+				return;
+
+			if (shouldPreserveRelativePath(name, preservedPaths))
+				return;
+
+			rmSync(join(destinationFolder, name), {
+				recursive: true,
+				force: true
+			});
+		});
+	}
+
+	readdirSync(sourceFolder).forEach(name => {
+		const sourcePath = join(sourceFolder, name);
+		const destinationPath = join(destinationFolder, name);
+
+		if (statSync(sourcePath).isDirectory()) {
+			const preserveWholeFolder = preservedPaths.includes(name);
+			const nestedPreservedPaths = preservedPaths
+				.filter(preservedPath => isSameOrWithinPath(preservedPath, name) || isSameOrWithinPath(name, preservedPath))
+				.map(preservedPath => preservedPath === name
+					? ''
+					: preservedPath.startsWith(`${name}/`)
+						? preservedPath.slice(name.length + 1)
+						: preservedPath)
+				.filter(Boolean);
+
+			copyFolderContentsRecursive(sourcePath, destinationPath, {
+				deleteExtra: deleteExtra && !preserveWholeFolder,
+				preservedPaths: nestedPreservedPaths
+			});
+
+			return;
+		}
+
+		mkdirSync(dirname(destinationPath), { recursive: true });
+		copyFileSync(sourcePath, destinationPath);
+	});
+};
+
+const deleteFolderCrossPlatform = (folderPath, preservedPaths = []) => {
 	const fullPath = resolve(folderPath);
 	const mainPath = join(fullPath, 'main.jsx');
 
@@ -159,13 +227,22 @@ const deleteFolderCrossPlatform = folderPath => {
 		}
 	}
 
-	try {
-		if (process.platform === 'win32') {
-			execSync(`rmdir /s /q "${fullPath}"`);
-		} else {
-			execSync(`rm -rf "${fullPath}"`);
-		}
-	} catch (err) {}
+	if (preservedPaths.length > 0 && existsSync(fullPath)) {
+		readdirSync(fullPath).forEach(name => {
+			if (shouldPreserveRelativePath(name, preservedPaths))
+				return;
+
+			rmSync(join(fullPath, name), {
+				recursive: true,
+				force: true
+			});
+		});
+	} else {
+		rmSync(fullPath, {
+			recursive: true,
+			force: true
+		});
+	}
 
 	if (!replaceMainJsx && mainContents !== null) {
 		mkdirSync(dirname(mainPath), { recursive: true });
@@ -308,46 +385,12 @@ const copyStaticFiles = () => {
 
 	if (existsSync(publicSrc)) {
 		mkdirSync(publicDest, { recursive: true });
-
-		if (process.platform === 'win32') {
-			try {
-				execSync(
-					`robocopy "${publicSrc}" "${publicDest}" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP`,
-					{ stdio: 'ignore' }
-				);
-			} catch (err) {
-				const code = err.status;
-
-				// Robocopy returns codes 0–3 for success
-				if (code > 3) {
-					console.error(`Robocopy failed with code ${code}`);
-					throw err;
-				}
-			}
-		} else
-			execSync(`cp -R "${publicSrc}/." "${publicDest}"`);
+		copyFolderContentsRecursive(publicSrc, publicDest, { deleteExtra: true });
 	}
 
 	if (existsSync(appSrc)) {
 		mkdirSync(appDest, { recursive: true });
-
-		if (process.platform === 'win32') {
-			try {
-				execSync(
-					`robocopy "${appSrc}" "${appDest}" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP`,
-					{ stdio: 'ignore' }
-				);
-			} catch (err) {
-				const code = err.status;
-
-				// Robocopy returns codes 0–3 for success
-				if (code > 3) {
-					console.error(`Robocopy failed with code ${code}`);
-					throw err;
-				}
-			}
-		} else
-			execSync(`cp -R "${appSrc}/." "${publicSrc}"`);
+		copyFolderContentsRecursive(appSrc, appDest, { deleteExtra: true });
 
 		const appDashboardDest = resolve(
 			'output',
@@ -400,69 +443,33 @@ function copyCrossPlatform () {
 		}
 	}
 
-	if (process.platform === 'win32') {
-		// src/
-		if (existsSync(srcSrc)) {
-			try {
-				execSync(
-					`robocopy "${srcSrc}" "${destSrc}" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP`,
-					{ stdio: 'ignore' }
-				);
-			} catch (err) {
-				if (err.status > 3)
-					throw err;
-			}
-		}
+	if (existsSync(srcSrc)) {
+		const preservedPaths = preservedSrcFolders.map(normalizeRelativePath);
 
-		// public/
-		if (existsSync(srcPublic)) {
-			try {
-				execSync(
-					`robocopy "${srcPublic}" "${destPublic}" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP`,
-					{ stdio: 'ignore' }
-				);
-			} catch (err) {
-				if (err.status > 3)
-					throw err;
-			}
-		}
+		if (!replaceMainJsx)
+			preservedPaths.push('main.jsx');
 
-		// app/
-		if (existsSync(srcApp)) {
-			try {
-				execSync(
-					`robocopy "${srcApp}" "${destApp}" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP`,
-					{ stdio: 'ignore' }
-				);
-			} catch (err) {
-				if (err.status > 3)
-					throw err;
-			}
-		}
+		copyFolderContentsRecursive(srcSrc, destSrc, {
+			deleteExtra: true,
+			preservedPaths
+		});
+	}
 
-		// index.html
-		if (existsSync(srcIndex)) {
-			mkdirSync(dirname(destIndex), { recursive: true });
-			copyFileSync(srcIndex, destIndex);
-		}
-	} else {
-		// src/
-		if (existsSync(srcSrc))
-			execSync(`cp -R "${srcSrc}" "${destSrc}"`);
+	if (existsSync(srcPublic)) {
+		copyFolderContentsRecursive(srcPublic, destPublic, {
+			deleteExtra: replacePublicFolder
+		});
+	}
 
-		// app/
-		if (existsSync(srcApp))
-			execSync(`cp -R "${srcApp}" "${destApp}"`);
+	if (existsSync(srcApp)) {
+		copyFolderContentsRecursive(srcApp, destApp, {
+			deleteExtra: true
+		});
+	}
 
-		// public/
-		if (existsSync(srcPublic))
-			execSync(`cp -R "${srcPublic}" "${destPublic}"`);
-
-		// index.html
-		if (existsSync(srcIndex)) {
-			mkdirSync(dirname(destIndex), { recursive: true });
-			copyFileSync(srcIndex, destIndex);
-		}
+	if (existsSync(srcIndex)) {
+		mkdirSync(dirname(destIndex), { recursive: true });
+		copyFileSync(srcIndex, destIndex);
 	}
 
 	if (!replaceMainJsx && mainContents !== null) {
@@ -482,6 +489,8 @@ loadMdaPackage();
 console.log('Building Files Map');
 buildFileSet(mdaPackage);
 
+dynamicRootTypes = analyzeDynamicRootTypes(mapFiles);
+
 console.log('Loading Custom Code');
 buildSrcFoldersAndFiles();
 
@@ -499,7 +508,7 @@ await new Promise(res => setTimeout(res, 200));
 console.log('Performing Cleanup');
 const targetSrc = resolve(targetApplicationFolder, 'src');
 
-deleteFolderCrossPlatform(targetSrc);
+deleteFolderCrossPlatform(targetSrc, preservedSrcFolders.map(normalizeRelativePath));
 
 await new Promise(res => setTimeout(res, 200));
 

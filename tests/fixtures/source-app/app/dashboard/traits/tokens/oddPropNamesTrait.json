@@ -1,0 +1,12 @@
+{
+	"id": "%field/name%",
+	"type": "label",
+	"acceptPrps": {
+		"field/name": "string",
+		"display label": "string"
+	},
+	"prps": {
+		"cpt": "%display label%",
+		"data/path": "$field/name$"
+	}
+}

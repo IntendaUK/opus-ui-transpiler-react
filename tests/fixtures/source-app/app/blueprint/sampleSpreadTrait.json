@@ -1,0 +1,9 @@
+{
+	"actions": [
+		{
+			"type": "showNotification",
+			"msgType": "success",
+			"msg": "Blueprint action copied"
+		}
+	]
+}

@@ -1,0 +1,11 @@
+{
+	"acceptPrps": {
+		"traits": "array"
+	},
+	"scope": "dynamicArrayContainer",
+	"type": "container",
+	"traits": "$traits$",
+	"prps": {
+		"dir": "vertical"
+	}
+}

@@ -1,0 +1,11 @@
+{
+	"id": "staticTraitRootId",
+	"type": "label",
+	"acceptPrps": {
+		"id": "string",
+		"caption": "string"
+	},
+	"prps": {
+		"cpt": "%caption%"
+	}
+}

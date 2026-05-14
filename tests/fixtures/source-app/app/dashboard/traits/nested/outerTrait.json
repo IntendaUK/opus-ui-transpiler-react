@@ -1,0 +1,13 @@
+{
+	"acceptPrps": {
+		"label": "string"
+	},
+	"traits": [
+		{
+			"trait": "traits/nested/baseTrait",
+			"traitPrps": {
+				"label": "%label%"
+			}
+		}
+	]
+}

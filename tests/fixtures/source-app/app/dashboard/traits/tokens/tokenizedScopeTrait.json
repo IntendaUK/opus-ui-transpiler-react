@@ -1,0 +1,16 @@
+{
+	"scope": "%scope%",
+	"type": "container",
+	"acceptPrps": {
+		"scope": "string",
+		"caption": "string"
+	},
+	"wgts": [
+		{
+			"type": "label",
+			"prps": {
+				"cpt": "%caption%"
+			}
+		}
+	]
+}

@@ -3,6 +3,8 @@
 ## Transpilation Status
 * MBB App: 100%
 * Opus UI website: 100%
+* Bridge App: 100%
+* Legoz App: ?%
 
 ## Next Steps
 * Infinite recursion bug in morphProps when running transpiled Legoz

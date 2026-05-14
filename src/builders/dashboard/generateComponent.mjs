@@ -1,12 +1,14 @@
 //Getters / Setters
-import { setNeedsHelpers } from './generateImports.mjs';
+import { setNeedsDynamicTraitResolver, setNeedsHelpers } from './generateImports.mjs';
 import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
+import { getDynamicRootTypeInfo, registerDynamicRootTypeComponentMap } from './dynamicRootTypes.mjs';
 
 //Helpers
 import buildProps from './buildProps.mjs';
 import buildTraitsInfo from './buildTraitsInfo.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
+import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
 
 const containsGeneratedJsx = value => {
 	if (typeof(value) === 'string')
@@ -31,11 +33,31 @@ const buildFunctionalTraitPrps = traitPrps => {
 	})}}`;
 };
 
+const buildTraitApplication = trait => {
+	if (trait.isDynamicArray) {
+		setNeedsDynamicTraitResolver(true);
+
+		return `...(${trait.expression} ?? []).map(trait => {
+			const traitPath = trait.trait ?? trait;
+			return resolveDynamicTrait(traitPath)?.(trait.traitPrps ?? {});
+		})`;
+	}
+
+	if (trait.isDynamic) {
+		setNeedsDynamicTraitResolver(true);
+
+		return `resolveDynamicTrait(${trait.expression})?.(${buildFunctionalTraitPrps(trait.traitPrps)})`;
+	}
+
+	return `${trait.type}(${buildFunctionalTraitPrps(trait.traitPrps)})`;
+};
+
 //Export
 const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 	let { type, prps, wgts, condition } = obj;
 
 	let componentType;
+	let dynamicRootType;
 
 	const traitsInfo = buildTraitsInfo(obj, { isInRowMda: false });
 	const hasFunctionalTraits = traitsInfo?.otherTraits.length > 0;
@@ -49,10 +71,21 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 		if (!type)
 			type = 'label';
 
-		componentType = type[0].toUpperCase() + type.substring(1);
+		dynamicRootType = getDynamicRootTypeInfo(type);
 
-		if (!getUsedComponentTypes().includes(type))
-			pushToUsedComponentTypes(type);
+		if (dynamicRootType) {
+			dynamicRootType.values.forEach(value => {
+				if (!getUsedComponentTypes().includes(value))
+					pushToUsedComponentTypes(value);
+			});
+
+			componentType = 'DynamicRootTypeComponent';
+		} else {
+			componentType = type[0].toUpperCase() + type.substring(1);
+
+			if (!getUsedComponentTypes().includes(type))
+				pushToUsedComponentTypes(type);
+		}
 	}
 
 	if (type === 'viewport') {
@@ -84,7 +117,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 	if (Array.isArray(wgts))
 		children = wgts.map(component => generateComponent(component, false, wgts.length === 1));
 	else if (typeof(wgts) === 'string' && wgts[0] === '$')
-		children = [`{traitPrps.${wgts.replaceAll('$', '')}}`];
+		children = [`{${buildTraitPrpsAccessor(wgts.replaceAll('$', ''))}}`];
 
 	let res;
 
@@ -106,10 +139,13 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 		}
 
 		if (key === 'scope') {
+			const fixedValue = injectTraitPrpsInString(`"${value}"`);
 			if (isRootLevel)
-				sysPrps.push(`${key}${s}${bl}['${value}', scope]${br}`);
+				sysPrps.push(`${key}${s}${bl}[${fixedValue}, scope]${br}`);
+			else if (!hasFunctionalTraits && (fixedValue.indexOf('traitPrps') === 0 || fixedValue[0] === '`'))
+				sysPrps.push(`${key}${s}{${fixedValue}}`);
 			else
-				sysPrps.push(`${key}${s}'${value}'`);
+				sysPrps.push(`${key}${s}${fixedValue}`);
 		} else {
 			let fixedValue = injectTraitPrpsInString(`"${value}"`);
 			if (!hasFunctionalTraits && (fixedValue.indexOf('traitPrps') === 0 || fixedValue[0] === '`'))
@@ -135,7 +171,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 
 	if (hasFunctionalTraits) {
 		traitsString = `
-			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${traitsInfo.otherTraits.map(t => `${t.type}(${buildFunctionalTraitPrps(t.traitPrps)})`).join(',')}] }) }
+			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${traitsInfo.otherTraits.map(buildTraitApplication).join(',')}] }) }
 		`;
 
 		sysPrpsString = '';
@@ -145,7 +181,25 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 	if (getIsFunctionalTrait())
 		res = `prps: { ${prpsString} }`;
 	else {
-		const inner = `<${componentType} ${traitsString} ${sysPrpsString} ${mainTraitPrpsString} ${prpsString} ${restString}>${children.join('')}</${componentType}>`;
+		let inner = `<${componentType} ${traitsString} ${sysPrpsString} ${mainTraitPrpsString} ${prpsString} ${restString}>${children.join('')}</${componentType}>`;
+
+		if (dynamicRootType) {
+			const mapName = registerDynamicRootTypeComponentMap(dynamicRootType.values);
+			const typeAccessor = buildTraitPrpsAccessor(dynamicRootType.propName);
+			const fallbackType = dynamicRootType.values[0];
+			const fallback = fallbackType
+				? ` ?? ${mapName}[${JSON.stringify(fallbackType)}]`
+				: '';
+
+			inner = `(() => {
+				const DynamicRootTypeComponent = ${mapName}[${typeAccessor}]${fallback};
+
+				if (!DynamicRootTypeComponent)
+					return null;
+
+				return ${inner};
+			})()`;
+		}
 
 		if (condition) {
 			const conditionString = buildProps({
@@ -157,7 +211,9 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 
 			if (!isRootLevel)
 				res = `{${res}}`;
-		} else
+		} else if (dynamicRootType && !isRootLevel)
+			res = `{${inner}}`;
+		else
 			res = inner;
 	}
 

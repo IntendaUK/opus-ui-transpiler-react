@@ -1,0 +1,8 @@
+{
+	"acceptPrps": {
+		"rowItems": "array"
+	},
+	"prps": {
+		"wgts": "$rowItems$"
+	}
+}

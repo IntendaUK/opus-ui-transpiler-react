@@ -1,0 +1,16 @@
+{
+	"acceptPrps": {
+		"dynamicTrait": "string"
+	},
+	"scope": "dynamicContainer",
+	"type": "container",
+	"traits": [
+		{
+			"trait": "traits/static/staticFunctionalTrait"
+		},
+		"%dynamicTrait%"
+	],
+	"prps": {
+		"dir": "vertical"
+	}
+}

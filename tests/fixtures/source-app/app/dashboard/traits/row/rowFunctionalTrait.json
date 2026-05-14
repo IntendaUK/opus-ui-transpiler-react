@@ -1,0 +1,8 @@
+{
+	"acceptPrps": {
+		"rowColor": "string"
+	},
+	"prps": {
+		"backgroundColor": "%rowColor%"
+	}
+}

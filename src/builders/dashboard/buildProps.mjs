@@ -10,6 +10,8 @@ import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponent
 import buildTraitsInfo from './buildTraitsInfo.mjs';
 import findComponentLibraryName from './findComponentLibraryName.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
+import pathToIdentifier from '../pathToIdentifier.mjs';
+import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
 
 //Export
 const buildProps = ({
@@ -41,17 +43,7 @@ const buildProps = ({
 		if (k === 'srcAction' || k === 'srcActions') {
 			const path = `dashboard/${v.path}`;
 
-			const type = path
-				.replace('@', '')
-				.replace('dashboard/', '')
-				.split('/')
-				.map((t, i) => {
-					if (i === 0)
-						return t;
-
-					return t[0].toUpperCase() + t.substring(1);
-				})
-				.join('');
+			const type = pathToIdentifier(path, { capitalizeFirstSegment: false });
 
 			pushToScriptImports({
 				type,
@@ -78,7 +70,7 @@ const buildProps = ({
 
 		if (k === 'spread-') {
 			const traitProp = v.replaceAll('$', '');
-			lines.push(`...traitPrps.${traitProp}`);
+			lines.push(`...${buildTraitPrpsAccessor(traitProp)}`);
 
 			return;
 		}
@@ -118,6 +110,12 @@ const buildProps = ({
 				});
 				lines.push(`traitPrps: {${traitPrps}}`);
 			}
+			else if (!prps.type) {
+				if (!getUsedComponentTypes().includes('label'))
+					pushToUsedComponentTypes('label');
+
+				lines.push('type: Label');
+			}
 
 			if (traitsInfo.otherTraits.length) {
 				const otherTraitsString = traitsInfo.otherTraits
@@ -136,15 +134,9 @@ const buildProps = ({
 
 		if (vType === 'string') {
 			if (v[0] === '%' && v[v.length - 1] === '%') {
-				if (v.includes(' ') || v.includes('/') && !v.includes('.'))
-					value = `traitPrps['${v.replaceAll('%', '')}']`;
-				else
-					value = `traitPrps.${v.replaceAll('%', '').split('.').join('?.')}`;
+				value = buildTraitPrpsAccessor(v.replaceAll('%', ''));
 			} else if (v[0] === '$' && v[v.length - 1] === '$') {
-				if (v.includes(' ') || v.includes('/') && !v.includes('.'))
-					value = `traitPrps['${v.replaceAll('$', '')}']`;
-				else
-					value = `traitPrps.${v.replaceAll('$', '').split('.').join('?.')}`;
+				value = buildTraitPrpsAccessor(v.replaceAll('$', ''));
 			} else if (v.indexOf('<>') === 0 || k === 'handler' || v.indexOf('(() => {') === 0)
 				value = v;
 
