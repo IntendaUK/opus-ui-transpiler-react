@@ -3,11 +3,11 @@ import { fileURLToPath } from 'node:url';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-const defaultSourceApplicationFolder = resolve(workspaceRoot, 'ethiqal');
+const defaultSourceApplicationFolder = resolve(workspaceRoot, 'legoz');
 const defaultTargetApplicationFolder = resolve(workspaceRoot, 'packages', 'legoz');
 const defaultReplaceMainJsx = false;
-const defaultReplacePublicFolder = false;
-const defaultPreservedSrcFolders = ['scriptActions'];
+const defaultReplacePublicFolder = true;
+const defaultPreservedSrcFolders = ['themes'];
 
 const parseBool = (value, fallback) => value === undefined
 	? fallback

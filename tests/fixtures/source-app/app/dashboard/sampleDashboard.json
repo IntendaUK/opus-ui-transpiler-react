@@ -25,6 +25,29 @@
 			}
 		},
 		{
+			"id": "arrayScopeContainer",
+			"scope": [
+				"alphaScope",
+				"betaScope"
+			],
+			"type": "container",
+			"prps": {
+				"dir": "horizontal"
+			}
+		},
+		{
+			"id": "composedFunctionalTraitComponent",
+			"type": "label",
+			"traits": [
+				{
+					"trait": "traits/composed/parentFunctionalTrait",
+					"traitPrps": {
+						"caption": "Composed caption"
+					}
+				}
+			]
+		},
+		{
 			"id": "nestedTraitLabel",
 			"traits": [
 				{
@@ -192,7 +215,12 @@
 			},
 			"traits": [
 				{
-					"trait": "traits/static/staticFunctionalTrait"
+					"trait": "traits/static/staticFunctionalTrait",
+					"condition": {
+						"operator": "isEqual",
+						"value": "{theme.colors.primary}",
+						"compareValue": "#123456"
+					}
 				}
 			]
 		},

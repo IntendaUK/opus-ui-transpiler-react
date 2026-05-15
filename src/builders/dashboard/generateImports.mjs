@@ -3,6 +3,7 @@ import { getUsedComponentTypes } from './usedComponentTypes.mjs';
 import { getScriptImports } from './scriptImports.mjs';
 import { getTraitImports } from './traitImports.mjs';
 import { getDynamicRootTypeComponentMaps } from './dynamicRootTypes.mjs';
+import { getMapFilesEntry } from './mapFiles.mjs';
 
 //Helpers
 import findComponentLibraryName from './findComponentLibraryName.mjs';
@@ -36,6 +37,19 @@ const getRelativeImportPath = (currentPath, targetPath) => {
 	const remaining = targetParts.slice(i).join('/');
 
 	return (ups === 0 ? './' : upStr) + remaining;
+};
+
+const getTraitImportPath = (currentPath, targetPath) => {
+	const relativePath = getRelativeImportPath(currentPath, targetPath);
+	const collisionEntry = (
+		getMapFilesEntry(targetPath) ??
+		getMapFilesEntry(targetPath.replace(/^dashboard\//, ''))
+	);
+
+	if (collisionEntry?.type === 'scriptAction')
+		return `${relativePath}.jsx`;
+
+	return relativePath;
 };
 
 export const initGenerateImports = ({ currentPath: _currentPath }) => {
@@ -72,7 +86,14 @@ const generateImports = () => {
 				return `import { ${componentTypes.join(', ')} } from '${k}';`;
 			}),
 		'\n\n',
-		...[...getTraitImports(), ...getScriptImports()]
+		...getTraitImports()
+			.map(({ type, path }) => {
+				const relativePath = getTraitImportPath(currentPath, path);
+
+				return `import ${type} from '${relativePath}';`;
+			})
+			.flat(),
+		...getScriptImports()
 			.map(({ type, path }) => {
 				const relativePath = getRelativeImportPath(currentPath, path);
 

@@ -5,6 +5,9 @@ export const resetScriptImports = () => {
 };
 
 export const pushToScriptImports = entry => {
+	if (scriptImports.some(({ type, path }) => type === entry.type && path === entry.path))
+		return;
+
 	scriptImports.push(entry);
 };
 

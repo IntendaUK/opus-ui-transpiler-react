@@ -1,0 +1,11 @@
+{
+	"acceptPrps": {},
+	"prps": {
+		"flows": [
+			{
+				"fromKey": "sourceValue",
+				"toKey": "targetValue"
+			}
+		]
+	}
+}

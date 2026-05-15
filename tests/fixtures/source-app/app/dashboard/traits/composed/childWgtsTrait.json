@@ -1,0 +1,12 @@
+{
+	"acceptPrps": {
+		"wgts": {
+			"type": "array",
+			"dft": []
+		}
+	},
+	"wgts": "$wgts$",
+	"prps": {
+		"classes": "child-wgts-trait"
+	}
+}

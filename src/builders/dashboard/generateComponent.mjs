@@ -10,51 +10,82 @@ import buildTraitsInfo from './buildTraitsInfo.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
 
-const containsGeneratedJsx = value => {
-	if (typeof(value) === 'string')
-		return value.indexOf('<>') === 0;
-
-	if (Array.isArray(value))
-		return value.some(containsGeneratedJsx);
-
-	if (typeof(value) === 'object' && value !== null)
-		return Object.values(value).some(containsGeneratedJsx);
-
-	return false;
-};
-
 const buildFunctionalTraitPrps = traitPrps => {
-	if (!containsGeneratedJsx(traitPrps))
-		return JSON.stringify(traitPrps);
-
-	return `{${buildProps({
+	const propsString = buildProps({
 		prps: traitPrps,
 		wrap: false
-	})}}`;
+	});
+
+	if (!propsString)
+		return '{}';
+
+	return `{${propsString}}`;
 };
 
 const buildTraitApplication = trait => {
+	const wrapCondition = expression => {
+		if (!trait.condition)
+			return expression;
+
+		const conditionString = buildProps({
+			prps: trait.condition,
+			wrap: false
+		});
+
+		return `isConditionMet({${conditionString}}) ? ${expression} : null`;
+	};
+
 	if (trait.isDynamicArray) {
 		setNeedsDynamicTraitResolver(true);
 
-		return `...(${trait.expression} ?? []).map(trait => {
+		const mappedTraits = `(${trait.expression} ?? []).map(trait => {
 			const traitPath = trait.trait ?? trait;
 			return resolveDynamicTrait(traitPath)?.(trait.traitPrps ?? {});
 		})`;
+
+		if (trait.condition) {
+			const conditionString = buildProps({
+				prps: trait.condition,
+				wrap: false
+			});
+
+			return `...(isConditionMet({${conditionString}}) ? ${mappedTraits} : [])`;
+		}
+
+		return `...${mappedTraits}`;
 	}
 
 	if (trait.isDynamic) {
 		setNeedsDynamicTraitResolver(true);
 
-		return `resolveDynamicTrait(${trait.expression})?.(${buildFunctionalTraitPrps(trait.traitPrps)})`;
+		return wrapCondition(`resolveDynamicTrait(${trait.expression})?.(${buildFunctionalTraitPrps(trait.traitPrps)})`);
 	}
 
-	return `${trait.type}(${buildFunctionalTraitPrps(trait.traitPrps)})`;
+	return wrapCondition(`${trait.type}(${buildFunctionalTraitPrps(trait.traitPrps)})`);
 };
 
+const buildSysPropValue = value => {
+	if (Array.isArray(value))
+		return `[${value.map(buildSysPropValue).join(', ')}]`;
+
+	if (typeof(value) !== 'string')
+		return JSON.stringify(value);
+
+	return injectTraitPrpsInString(JSON.stringify(value));
+};
+
+const needsJsxExpression = value => (
+	Array.isArray(value) ||
+	typeof(value) !== 'string' ||
+	value.indexOf('traitPrps') === 0 ||
+	value[0] === '`' ||
+	value[0] === '['
+);
+
 //Export
-const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
+const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) => {
 	let { type, prps, wgts, condition } = obj;
+	const isFunctionalTraitObject = getIsFunctionalTrait() && isRootLevel && !options.forceJsx;
 
 	let componentType;
 	let dynamicRootType;
@@ -99,7 +130,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 		prps,
 		traitsInfo,
 		isRootLevel,
-		wrap: !getIsFunctionalTrait() && !hasFunctionalTraits
+		wrap: !isFunctionalTraitObject && !hasFunctionalTraits
 	});
 
 	let mainTraitPrpsString = buildProps({
@@ -115,7 +146,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 
 	let children = [];
 	if (Array.isArray(wgts))
-		children = wgts.map(component => generateComponent(component, false, wgts.length === 1));
+		children = wgts.map(component => generateComponent(component, false, wgts.length === 1, options));
 	else if (typeof(wgts) === 'string' && wgts[0] === '$')
 		children = [`{${buildTraitPrpsAccessor(wgts.replaceAll('$', ''))}}`];
 
@@ -139,16 +170,22 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 		}
 
 		if (key === 'scope') {
-			const fixedValue = injectTraitPrpsInString(`"${value}"`);
-			if (isRootLevel)
-				sysPrps.push(`${key}${s}${bl}[${fixedValue}, scope]${br}`);
-			else if (!hasFunctionalTraits && (fixedValue.indexOf('traitPrps') === 0 || fixedValue[0] === '`'))
+			let fixedValue = buildSysPropValue(value);
+
+			if (isRootLevel) {
+				if (Array.isArray(value))
+					fixedValue = `[${value.map(buildSysPropValue).join(', ')}, scope]`;
+				else
+					fixedValue = `[${fixedValue}, scope]`;
+			}
+
+			if (!hasFunctionalTraits && (isRootLevel || needsJsxExpression(value) || needsJsxExpression(fixedValue)))
 				sysPrps.push(`${key}${s}{${fixedValue}}`);
 			else
 				sysPrps.push(`${key}${s}${fixedValue}`);
 		} else {
-			let fixedValue = injectTraitPrpsInString(`"${value}"`);
-			if (!hasFunctionalTraits && (fixedValue.indexOf('traitPrps') === 0 || fixedValue[0] === '`'))
+			let fixedValue = buildSysPropValue(value);
+			if (!hasFunctionalTraits && needsJsxExpression(fixedValue))
 				sysPrps.push(`${key}${s}{${fixedValue}}`);
 			else
 				sysPrps.push(`${key}${s}${fixedValue}`);
@@ -164,12 +201,12 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 	let sysPrpsString = sysPrps.join(hasFunctionalTraits ? ',' : ' ');
 
 	let restString = '';
-	if (isRootLevel && !getIsFunctionalTrait())
+	if (isRootLevel && !isFunctionalTraitObject)
 		restString = '{...rest}';
 
 	let traitsString = '';
 
-	if (hasFunctionalTraits) {
+	if (hasFunctionalTraits && !isFunctionalTraitObject) {
 		traitsString = `
 			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${traitsInfo.otherTraits.map(buildTraitApplication).join(',')}] }) }
 		`;
@@ -178,8 +215,12 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild) => {
 		prpsString = '';
 	}
 
-	if (getIsFunctionalTrait())
-		res = `prps: { ${prpsString} }`;
+	if (isFunctionalTraitObject) {
+		if (hasFunctionalTraits)
+			res = `...applyTraits({ prps: { ${prpsString} }, traits: [${traitsInfo.otherTraits.map(buildTraitApplication).join(',')}] })`;
+		else
+			res = `prps: { ${prpsString} }`;
+	}
 	else {
 		let inner = `<${componentType} ${traitsString} ${sysPrpsString} ${mainTraitPrpsString} ${prpsString} ${restString}>${children.join('')}</${componentType}>`;
 

@@ -1,5 +1,21 @@
 import buildProps from './buildProps.mjs';
 
+const buildDefaultValueExpression = value => {
+	if (typeof(value) !== 'string' || !value.includes('{theme.'))
+		return JSON.stringify(value, null, '\t');
+
+	const directThemeMatch = value.match(/^\{theme\.([^}]+)\}$/);
+	if (directThemeMatch)
+		return `getThemeValue('${directThemeMatch[1]}')`;
+
+	const interpolated = value
+		.replaceAll('`', '\\`')
+		.replaceAll('${', '\\${')
+		.replace(/\{theme\.([^}]+)\}/g, (_, path) => `\${getThemeValue('${path}')}`);
+
+	return `\`${interpolated}\``;
+};
+
 const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => {
 	const applyDefaults = Object.entries(acceptPrps)
 		.filter(([k, v]) => v.dft !== undefined)
@@ -7,7 +23,7 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 			if (!v.internal) {
 				let defaulter = `
 					if (traitPrps.${k} === undefined) {
-						traitPrps.${k} = ${JSON.stringify(v.dft, null, '\t')};
+						traitPrps.${k} = ${buildDefaultValueExpression(v.dft)};
 					}
 				`;
 
@@ -18,7 +34,7 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 				return defaulter;
 			}
 
-			return `traitPrps.${k} = ${JSON.stringify(v.dft, null, '\t')};`;
+			return `traitPrps.${k} = ${buildDefaultValueExpression(v.dft)};`;
 		})
 		.join('');
 
@@ -35,6 +51,7 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 			`;
 
 			morpher = morpher.replaceAll('"', '`');
+			morpher = morpher.replace(/([,{]\s*)`([^`]+)`\s*:/g, '$1[`$2`]:');
 
 			Object.entries(acceptPrps).forEach(([k, v]) => {
 				morpher = morpher.replaceAll(`%${k}%`, `\$\{traitPrps.${k}}`);

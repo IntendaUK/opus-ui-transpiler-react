@@ -208,6 +208,373 @@ const createNumericTraitPathSourceApp = () => {
 	return sourceApp;
 };
 
+const createRowMdaMustacheTraitsSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-row-mda-mustache-traits');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'rowMdaMustacheTraitsRepeater',
+		type: 'repeater',
+		prps: {
+			staticData: [{
+				caption: 'Runtime trait row',
+				traits: [{
+					trait: 'traits/row/rowFunctionalTrait',
+					traitPrps: {
+						rowColor: 'primary'
+					}
+				}]
+			}],
+			rowMda: {
+				id: 'mustache-trait-row-((rowNumber))',
+				type: 'container',
+				traits: '{{rowData.traits}}',
+				prps: {
+					flex: true
+				}
+			}
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createDuplicateScriptActionImportSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-duplicate-script-action-import');
+	const duplicateTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'scriptActions', 'duplicateActionTrait.json');
+	const configStyleActionPath = join(sourceApp, 'app', 'dashboard', 'scriptActions', 'configStyleAction.js');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(duplicateTraitPath), { recursive: true });
+	writeFileSync(duplicateTraitPath, JSON.stringify({
+		acceptPrps: {},
+		prps: {
+			scps: [{
+				actions: [{
+					srcAction: 'scriptActions/sampleAction',
+					direction: -1
+				}, {
+					srcAction: 'scriptActions/sampleAction',
+					direction: 0
+				}, {
+					srcAction: 'scriptActions/sampleAction',
+					direction: 1
+				}, {
+					srcAction: 'scriptActions/configStyleAction',
+					direction: 2
+				}]
+			}]
+		}
+	}, null, '\t'), 'utf8');
+	writeFileSync(configStyleActionPath, [
+		'const configStyleAction = ({ config: { direction } }) => direction;',
+		'',
+		'export default configStyleAction;',
+		''
+	].join('\n'), 'utf8');
+
+	return sourceApp;
+};
+
+const createTraitScriptBasenameCollisionSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-trait-script-basename-collision');
+	const parentTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'collision', 'parentTrait.json');
+	const childTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'collision', 'openThing.json');
+	const childActionPath = join(sourceApp, 'app', 'dashboard', 'traits', 'collision', 'openThing.js');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(parentTraitPath), { recursive: true });
+	writeFileSync(parentTraitPath, JSON.stringify({
+		acceptPrps: {},
+		traits: ['./openThing']
+	}, null, '\t'), 'utf8');
+	writeFileSync(childTraitPath, JSON.stringify({
+		acceptPrps: {},
+		type: 'label',
+		prps: {
+			cpt: 'Open thing trait',
+			scps: [{
+				actions: [{
+					srcAction: './openThing'
+				}]
+			}]
+		}
+	}, null, '\t'), 'utf8');
+	writeFileSync(childActionPath, [
+		'const openThing = ({ config }) => config;',
+		'',
+		'export default openThing;',
+		''
+	].join('\n'), 'utf8');
+
+	return sourceApp;
+};
+
+const createParenthesizedDataKeySourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-parenthesized-data-key');
+	const parenthesizedKeyTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'data', 'parenthesizedKeyTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(parenthesizedKeyTraitPath), { recursive: true });
+	writeFileSync(parenthesizedKeyTraitPath, JSON.stringify({
+		acceptPrps: {},
+		prps: {
+			data: {
+				results: {
+					post_list: [{
+						details: {
+							exceptions: [{
+								exception_cd: 'EXC9024',
+								'sum(transaction_amount)': 1063846.98
+							}]
+						}
+					}]
+				}
+			}
+		}
+	}, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createInlineThemeTemplateLiteralSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-inline-theme-template-literal');
+	const templateLiteralTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'flows', 'templateLiteralTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(templateLiteralTraitPath), { recursive: true });
+	writeFileSync(templateLiteralTraitPath, JSON.stringify({
+		acceptPrps: {},
+		prps: {
+			flows: [{
+				from: 'menuTree',
+				fromKey: 'width',
+				toKey: 'right',
+				mapFunctionString: [
+					'(v, { minWidth }) => {',
+					'  return `calc(100% - ${Math.max(v, minWidth)}px + {theme.colors.primary}px)`;',
+					'}'
+				],
+				inlineKeys: [
+					'mapFunctionString'
+				]
+			}]
+		}
+	}, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createThemedInlineTraitTokenSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-themed-inline-trait-token');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const percentTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'tokens', 'themedInlinePercentFunctionalTrait.json');
+	const dollarTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'tokens', 'themedInlineDollarFunctionalTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'themedInlinePercentFunctionalTraitUsage',
+		type: 'label',
+		traits: [{
+			trait: 'traits/tokens/themedInlinePercentFunctionalTrait',
+			traitPrps: {
+				flag: true
+			}
+		}]
+	}, {
+		id: 'themedInlineDollarFunctionalTraitUsage',
+		type: 'label',
+		traits: [{
+			trait: 'traits/tokens/themedInlineDollarFunctionalTrait',
+			traitPrps: {
+				flag: false
+			}
+		}]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+	mkdirSync(dirname(percentTraitPath), { recursive: true });
+
+	const buildTrait = token => ({
+		acceptPrps: {
+			flag: 'boolean'
+		},
+		prps: {
+			scps: [{
+				actions: [{
+					type: 'setVariable',
+					name: 'newState',
+					value: [
+						'{{eval.',
+						'  const res = { opacity: 1 };',
+						`  if (${token})`,
+						'    res.width = {theme.colors.primary};',
+						'  else',
+						'    res.width = 306;',
+						'  res;',
+						'}}'
+					],
+					inlineKeys: [
+						'value'
+					]
+				}]
+			}]
+		}
+	});
+
+	writeFileSync(percentTraitPath, JSON.stringify(buildTrait('%flag%'), null, '\t'), 'utf8');
+	writeFileSync(dollarTraitPath, JSON.stringify(buildTrait('$flag$'), null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createThemeDefaultTraitSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-theme-default-trait');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const buttonTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'theme', 'primaryButtonTrait.json');
+	const hoverTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'theme', 'hoverFunctionalTrait.json');
+	const buttonThemePath = join(sourceApp, 'app', 'theme', 'l2_buttons_colors.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'themeDefaultButtonUsage',
+		traits: [{
+			trait: 'traits/theme/primaryButtonTrait',
+			traitPrps: {
+				cpt: 'Theme default button'
+			}
+		}]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+	writeFileSync(buttonThemePath, JSON.stringify({
+		'primary/backgroundHoverOff': '{theme.colors.primary}',
+		'primary/textHoverOff': '{theme.colors.iconPrimary}'
+	}, null, '\t'), 'utf8');
+
+	mkdirSync(dirname(buttonTraitPath), { recursive: true });
+	writeFileSync(buttonTraitPath, JSON.stringify({
+		acceptPrps: {
+			cpt: 'string',
+			bgColorHoverOff: {
+				type: 'string',
+				dft: '{theme.l2_buttons_colors.primary/backgroundHoverOff}'
+			},
+			textHoverOff: {
+				type: 'string',
+				dft: '{theme.l2_buttons_colors.primary/textHoverOff}'
+			}
+		},
+		type: 'container',
+		prps: {
+			backgroundColor: '%bgColorHoverOff%'
+		},
+		traits: [{
+			trait: 'traits/theme/hoverFunctionalTrait',
+			traitPrps: {
+				bgColorHoverOff: '%bgColorHoverOff%'
+			}
+		}],
+		wgts: [{
+			type: 'label',
+			prps: {
+				cpt: '%cpt%',
+				color: '%textHoverOff%'
+			}
+		}]
+	}, null, '\t'), 'utf8');
+
+	writeFileSync(hoverTraitPath, JSON.stringify({
+		acceptPrps: {
+			bgColorHoverOff: 'string'
+		},
+		prps: {
+			scps: [{
+				actions: [{
+					type: 'setState',
+					key: 'backgroundColor',
+					value: '%bgColorHoverOff%'
+				}]
+			}]
+		}
+	}, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createMorphCaretConditionSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-morph-caret-condition');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const morphTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'morph', 'caretConditionTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'morphCaretConditionUsage',
+		traits: [{
+			trait: 'traits/morph/caretConditionTrait',
+			traitPrps: {
+				sourceValue: 'Visible value'
+			}
+		}]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+	mkdirSync(dirname(morphTraitPath), { recursive: true });
+	writeFileSync(morphTraitPath, JSON.stringify({
+		acceptPrps: {
+			sourceValue: 'string',
+			displayValue: {
+				morph: true,
+				morphVariable: 'result',
+				morphActions: [{
+					type: 'stopScript',
+					'^condition': {
+						operator: 'isFalsy',
+						value: '$sourceValue$'
+					}
+				}, {
+					type: 'setVariable',
+					name: 'result',
+					value: '%sourceValue%'
+				}]
+			}
+		},
+		type: 'label',
+		prps: {
+			cpt: '%displayValue%'
+		}
+	}, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
 before(() => {
 	rmSync(outputRoot, { recursive: true, force: true });
 	rmSync(tmpRoot, { recursive: true, force: true });
@@ -356,6 +723,32 @@ test('generated dashboard supports nested traits', () => {
 	assert.match(outerTrait, /traitPrps={{ label: traitPrps\.label }}/);
 });
 
+test('generated functional trait composes nested functional traits', () => {
+	const dashboard = readFileSync(join(outputSrc, 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+	const parentTrait = readFileSync(join(outputSrc, 'dashboard', 'traits', 'composed', 'parentFunctionalTrait.jsx'), 'utf8');
+
+	assert.match(dashboard, /import TraitsComposedParentFunctionalTrait from ["']\.\/traits\/composed\/parentFunctionalTrait["'];/);
+	assert.match(dashboard, /TraitsComposedParentFunctionalTrait\(\{\s*caption:\s*"Composed caption",?\s*\}\)/);
+
+	assert.match(parentTrait, /import TraitsComposedChildScpTrait from ["']\.\/childScpTrait["'];/);
+	assert.match(parentTrait, /import TraitsComposedChildFlowTrait from ["']\.\/childFlowTrait["'];/);
+	assert.match(parentTrait, /import TraitsComposedChildWgtsTrait from ["']\.\/childWgtsTrait["'];/);
+	assert.match(parentTrait, /import \{ applyTraits \} from ["']\.\.\/\.\.\/\.\.\/helpers["'];/);
+	assert.match(parentTrait, /return\s+\{\s*\.\.\.applyTraits\(\{\s*prps:\s*\{\s*classes:\s*"parent-functional-trait"/);
+	assert.match(parentTrait, /traits:\s*\[\s*TraitsComposedChildScpTrait\(\{\s*caption:\s*traitPrps\.caption,?\s*\}\),\s*TraitsComposedChildFlowTrait\(\{\}\),\s*TraitsComposedChildWgtsTrait\(\{/s);
+	assert.match(parentTrait, /wgts:\s*<>[\s\S]*<Label\s+\{\.\.\.applyTraits\(\{\s*sysPrps:\s*\{\},\s*prps:\s*\{\s*cpt:\s*"Widget with nested traits"/s);
+	assert.match(parentTrait, /<Label\s+\{\.\.\.applyTraits\([\s\S]*TraitsComposedChildFlowTrait\(\{\}\)[\s\S]*\)\s*\}[\s\S]*><\/Label>/);
+	assert.doesNotMatch(parentTrait, /<>\s*\.\.\.applyTraits/);
+	assert.doesNotMatch(parentTrait, /prps:\s*\{\s*\}\s*[\r\n]+\s*;/);
+});
+
+test('generated components preserve array scopes', () => {
+	const dashboard = readFileSync(join(outputSrc, 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	assert.match(dashboard, /id="arrayScopeContainer"[\s\S]*scope=\{\["alphaScope",\s*"betaScope"\]\}/);
+	assert.doesNotMatch(dashboard, /scope="alphaScope,betaScope"/);
+});
+
 test('generated typed traits only regenerate id when root id uses id trait prop token', () => {
 	const dashboard = readFileSync(join(outputSrc, 'dashboard', 'sampleDashboard.jsx'), 'utf8');
 	const tokenizedIdTrait = readFileSync(join(outputSrc, 'dashboard', 'traits', 'id', 'tokenizedIdTrait.jsx'), 'utf8');
@@ -450,7 +843,7 @@ test('generated tokenless root trait without acceptPrps is treated as functional
 	assert.match(dashboard, /import TraitsStaticStaticFunctionalTrait from ["']\.\/traits\/static\/staticFunctionalTrait["'];/);
 	assert.match(dashboard, /sysPrps:\s*{ id:\s*"tokenlessFunctionalTraitComponent" }/);
 	assert.match(dashboard, /prps:\s*{ cpt:\s*"Tokenless functional trait target" }/);
-	assert.match(dashboard, /TraitsStaticStaticFunctionalTrait\(\{\}\)/);
+	assert.match(dashboard, /isConditionMet\(\{\s*operator:\s*"isEqual",\s*value:\s*getThemeValue\(\s*["']colors\.primary["'],?\s*\),\s*compareValue:\s*"#123456",?\s*\}\)\s*\?\s*TraitsStaticStaticFunctionalTrait\(\{\}\)\s*:\s*null/);
 });
 
 test('generated dynamic traits are resolved and applied at runtime', () => {
@@ -558,20 +951,28 @@ test('transpiler preserves target main.jsx when replacement is disabled', () => 
 });
 
 test('transpiler preserves configured target src folders during replacement', () => {
+	const sourceApp = join(tmpRoot, 'source-app-preserve-src-folder');
 	const preserveTargetApp = join(tmpRoot, 'target-app-preserve-src-folder');
 	const preservedFile = join(preserveTargetApp, 'src', 'handwritten', 'keep.txt');
+	const preservedCollisionFile = join(preserveTargetApp, 'src', 'handwritten', 'customUtility.js');
+	const sourceCollisionFile = join(sourceApp, 'src', 'handwritten', 'customUtility.js');
 	const staleFile = join(preserveTargetApp, 'src', 'stale.txt');
 
+	rmSync(sourceApp, { recursive: true, force: true });
 	rmSync(preserveTargetApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+	mkdirSync(dirname(sourceCollisionFile), { recursive: true });
+	writeFileSync(sourceCollisionFile, 'generated file should not overwrite preserved folder\n', 'utf8');
 	mkdirSync(dirname(preservedFile), { recursive: true });
 	writeFileSync(preservedFile, 'keep this handwritten file\n', 'utf8');
+	writeFileSync(preservedCollisionFile, 'do not overwrite this handwritten file\n', 'utf8');
 	writeFileSync(staleFile, 'remove this stale file\n', 'utf8');
 
 	execFileSync(process.execPath, ['src/transpile.mjs'], {
 		cwd: process.cwd(),
 		env: {
 			...process.env,
-			OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: fixtureSourceApp,
+			OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
 			OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: preserveTargetApp,
 			OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true',
 			OPUS_TRANSPILER_PRESERVED_SRC_FOLDERS: 'handwritten'
@@ -580,7 +981,32 @@ test('transpiler preserves configured target src folders during replacement', ()
 	});
 
 	assert.equal(readFileSync(preservedFile, 'utf8'), 'keep this handwritten file\n');
+	assert.equal(readFileSync(preservedCollisionFile, 'utf8'), 'do not overwrite this handwritten file\n');
 	assert.ok(!existsSync(staleFile), 'Expected stale src files outside preserved folders to be deleted');
+	assertFileExists(join(preserveTargetApp, 'src', 'dashboard', 'sampleDashboard.jsx'));
+});
+
+test('transpiler preserves existing target src themes by default', () => {
+	const preserveTargetApp = join(tmpRoot, 'target-app-preserve-themes');
+	const preservedTheme = join(preserveTargetApp, 'src', 'themes', 'colors.jsx');
+	const customTheme = 'const Theme = { colors: { primary: "custom" } };\nexport default Theme;\n';
+
+	rmSync(preserveTargetApp, { recursive: true, force: true });
+	mkdirSync(dirname(preservedTheme), { recursive: true });
+	writeFileSync(preservedTheme, customTheme, 'utf8');
+
+	execFileSync(process.execPath, ['src/transpile.mjs'], {
+		cwd: process.cwd(),
+		env: {
+			...process.env,
+			OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: fixtureSourceApp,
+			OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: preserveTargetApp,
+			OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+		},
+		stdio: 'pipe'
+	});
+
+	assert.equal(readFileSync(preservedTheme, 'utf8'), customTheme);
 	assertFileExists(join(preserveTargetApp, 'src', 'dashboard', 'sampleDashboard.jsx'));
 });
 
@@ -691,4 +1117,304 @@ test('generated trait prop token paths support numeric array segments', () => {
 
 	assert.match(contents, /traitPrps=\{\{ fieldInfo: traitPrps\.fieldInfo\?\.\[0\] \}\}/);
 	assert.doesNotMatch(contents, /traitPrps\.fieldInfo\?\.0/);
+});
+
+test('generated typed trait resolves theme-backed defaults before passing props to components and nested traits', () => {
+	const sourceApp = createThemeDefaultTraitSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-theme-default-trait');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const primaryButtonTrait = join(
+		targetApp,
+		'src',
+		'dashboard',
+		'traits',
+		'theme',
+		'primaryButtonTrait.jsx'
+	);
+	const contents = readFileSync(primaryButtonTrait, 'utf8');
+
+	assert.match(contents, /import \{[^}]*getThemeValue[^}]*\} from ["']@intenda\/opus-ui["'];/);
+	assert.match(contents, /traitPrps\.bgColorHoverOff = getThemeValue\(\s*["']l2_buttons_colors\.primary\/backgroundHoverOff["'],?\s*\);/);
+	assert.match(contents, /traitPrps\.textHoverOff = getThemeValue\(\s*["']l2_buttons_colors\.primary\/textHoverOff["'],?\s*\);/);
+	assert.match(contents, /backgroundColor:\s*traitPrps\.bgColorHoverOff/);
+	assert.match(contents, /TraitsThemeHoverFunctionalTrait\(\{\s*bgColorHoverOff: traitPrps\.bgColorHoverOff,?\s*\}\)/);
+	assert.doesNotMatch(contents, /\{theme\.l2_buttons_colors\.primary\/backgroundHoverOff\}/);
+	assert.doesNotMatch(contents, /bgColorHoverOff:\s*["']%bgColorHoverOff%["']/);
+});
+
+test('generated morph accept prop preserves caret condition as valid object key', () => {
+	const sourceApp = createMorphCaretConditionSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-morph-caret-condition');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const caretConditionTrait = join(
+		targetApp,
+		'src',
+		'dashboard',
+		'traits',
+		'morph',
+		'caretConditionTrait.jsx'
+	);
+	const contents = readFileSync(caretConditionTrait, 'utf8');
+
+	assert.doesNotMatch(contents, /`\^condition`:/);
+	assert.match(contents, /(?:"\^condition"|\[`\^condition`\]):\s*\{/);
+});
+
+test('generated rowMda preserves mustache rowData traits for repeater runtime', () => {
+	const sourceApp = createRowMdaMustacheTraitsSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-row-mda-mustache-traits');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	assert.match(dashboard, /id="rowMdaMustacheTraitsRepeater"/);
+	assert.match(dashboard, /import \{ resolveDynamicTrait \} from ["']\.\.\/dynamicTraits["'];/);
+	assert.match(dashboard, /traits:\s*"{{rowData\.traits}}"/);
+	assert.match(dashboard, /resolveDynamicTrait:\s*resolveDynamicTrait/);
+});
+
+test('generated functional trait de-duplicates imports for repeated srcAction handlers', () => {
+	const sourceApp = createDuplicateScriptActionImportSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-duplicate-script-action-import');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const duplicateTrait = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'scriptActions', 'duplicateActionTrait.jsx'),
+		'utf8'
+	);
+	const importMatches = duplicateTrait.match(
+		/import scriptActionsSampleAction from ["']\.\.\/\.\.\/scriptActions\/sampleAction["'];/g
+	) ?? [];
+
+	assert.equal(importMatches.length, 1);
+	assert.match(
+		duplicateTrait,
+		/import scriptActionsConfigStyleAction from ["']\.\.\/\.\.\/scriptActions\/configStyleAction["'];/
+	);
+	assert.match(duplicateTrait, /handler:\s*scriptActionsSampleAction,\s*config:\s*\{\s*direction:\s*-1\s*\}/);
+	assert.match(duplicateTrait, /handler:\s*scriptActionsSampleAction,\s*config:\s*\{\s*direction:\s*0\s*\}/);
+	assert.match(duplicateTrait, /handler:\s*scriptActionsSampleAction,\s*config:\s*\{\s*direction:\s*1\s*\}/);
+	assert.match(duplicateTrait, /handler:\s*scriptActionsConfigStyleAction,\s*config:\s*\{\s*direction:\s*2\s*\}/);
+	assert.doesNotMatch(duplicateTrait, /handler:\s*scriptActionsSampleAction,\s*direction:/);
+	assert.doesNotThrow(() => assertJsSyntax(join(
+		targetApp,
+		'src',
+		'dashboard',
+		'traits',
+		'scriptActions',
+		'duplicateActionTrait.jsx'
+	)));
+});
+
+test('generated trait import includes jsx extension when a sibling js action has the same basename', () => {
+	const sourceApp = createTraitScriptBasenameCollisionSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-trait-script-basename-collision');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const parentTrait = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'collision', 'parentTrait.jsx'),
+		'utf8'
+	);
+
+	assert.match(parentTrait, /import TraitsCollisionOpenThing from ["']\.\/openThing\.jsx["'];/);
+	assert.doesNotMatch(parentTrait, /import TraitsCollisionOpenThing from ["']\.\/openThing["'];/);
+	assertFileExists(join(targetApp, 'src', 'dashboard', 'traits', 'collision', 'openThing.js'));
+	assertFileExists(join(targetApp, 'src', 'dashboard', 'traits', 'collision', 'openThing.jsx'));
+});
+
+test('generated functional trait quotes data keys that are not valid identifiers', () => {
+	const sourceApp = createParenthesizedDataKeySourceApp();
+	const targetApp = join(tmpRoot, 'target-app-parenthesized-data-key');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const parenthesizedKeyTrait = join(
+		targetApp,
+		'src',
+		'dashboard',
+		'traits',
+		'data',
+		'parenthesizedKeyTrait.jsx'
+	);
+	const contents = readFileSync(parenthesizedKeyTrait, 'utf8');
+
+	assert.match(contents, /"sum\(transaction_amount\)":\s*1063846\.98/);
+	assert.doesNotMatch(contents, /[^"']sum\(transaction_amount\):/);
+	assert.doesNotThrow(() => assertJsSyntax(parenthesizedKeyTrait));
+});
+
+test('generated functional trait preserves nested template interpolation inside theme-backed inline strings', async () => {
+	const sourceApp = createInlineThemeTemplateLiteralSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-inline-theme-template-literal');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const templateLiteralTrait = join(
+		targetApp,
+		'src',
+		'dashboard',
+		'traits',
+		'flows',
+		'templateLiteralTrait.jsx'
+	);
+	const contents = readFileSync(templateLiteralTrait, 'utf8');
+
+	assert.match(contents, /\\\$\{Math\.max\(v, minWidth\)\}/);
+	assert.match(contents, /\$\{getThemeValue\(["']colors\.primary["']\)\}/);
+});
+
+test('generated functional trait replaces percent trait prop tokens after inline theme conversion', () => {
+	const sourceApp = createThemedInlineTraitTokenSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-themed-inline-percent-trait-token');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const contents = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'tokens', 'themedInlinePercentFunctionalTrait.jsx'),
+		'utf8'
+	);
+
+	assert.match(contents, /if \(\$\{getDeepProperty\(traitPrps, ["']flag["']\)\}\)/);
+	assert.match(contents, /res\.width = \$\{getThemeValue\(["']colors\.primary["']\)\};/);
+	assert.doesNotMatch(contents, /%flag%/);
+});
+
+test('generated functional trait replaces dollar trait prop tokens after inline theme conversion', () => {
+	const sourceApp = createThemedInlineTraitTokenSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-themed-inline-dollar-trait-token');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const contents = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'tokens', 'themedInlineDollarFunctionalTrait.jsx'),
+		'utf8'
+	);
+
+	assert.match(contents, /if \(\$\{getDeepProperty\(traitPrps, ["']flag["']\)\}\)/);
+	assert.match(contents, /res\.width = \$\{getThemeValue\(["']colors\.primary["']\)\};/);
+	assert.doesNotMatch(contents, /\$flag\$/);
 });

@@ -85,7 +85,8 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 				isDynamic: true,
 				expression: buildTraitAccessor(trait),
 				traitPrps: { ...trait.traitPrps },
-				auth: trait.auth
+				auth: trait.auth,
+				condition: trait.condition
 			};
 		}
 
@@ -118,7 +119,7 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 		if (!isInRowMda) {
 			Object.entries(traitPrps).forEach(([k, v]) => {
 				if (v?.map && hasWgtsTokenOutsidePopover(contents, k))
-					traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1)).join('')}</>`;
+					traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1, { forceJsx: true })).join('')}</>`;
 			});
 		}
 
@@ -130,7 +131,8 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 			path,
 			contents,
 			traitPrps,
-			auth: trait.auth
+			auth: trait.auth,
+			condition: trait.condition
 		};
 	};
 

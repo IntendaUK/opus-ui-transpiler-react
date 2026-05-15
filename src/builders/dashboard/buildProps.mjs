@@ -1,8 +1,9 @@
 //Getters / Setters
 import { getIsTrait } from './isTrait.mjs';
-import { getOriginalFile } from './originalFile.mjs';
+import { getOriginalPath } from './originalFile.mjs';
 import { pushToScriptImports } from './scriptImports.mjs';
 import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
+import { setNeedsDynamicTraitResolver } from './generateImports.mjs';
 import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
 
@@ -13,6 +14,67 @@ import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 import pathToIdentifier from '../pathToIdentifier.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
 
+const isMustacheAccessor = value => (
+	typeof(value) === 'string' &&
+	value.indexOf('{{') === 0 &&
+	value.lastIndexOf('}}') === value.length - 2
+);
+
+const hasDynamicRowTraits = prps => {
+	if (!prps || typeof(prps) !== 'object')
+		return false;
+
+	if (isMustacheAccessor(prps.traits))
+		return true;
+
+	return Object.values(prps).some(value => {
+		if (Array.isArray(value))
+			return value.some(hasDynamicRowTraits);
+
+		if (typeof(value) === 'object' && value !== null)
+			return hasDynamicRowTraits(value);
+
+		return false;
+	});
+};
+
+const isValidBareObjectKey = key => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key);
+
+const buildObjectKey = key => {
+	if (isValidBareObjectKey(key))
+		return key;
+
+	return JSON.stringify(key);
+};
+
+const escapeTemplateInterpolations = value => value.replace(/(?<!\\)\$\{/g, '\\${');
+
+const scriptActionPassthroughKeys = new Set([
+	'actionCondition',
+	'hasSideEffects',
+	'isAsync',
+	'log',
+	'pushToVariable',
+	'storeAsVariable'
+]);
+
+const splitScriptActionProps = prps => {
+	const configPrps = {};
+	const passthroughPrps = {};
+
+	Object.entries(prps).forEach(([key, value]) => {
+		if (scriptActionPassthroughKeys.has(key))
+			passthroughPrps[key] = value;
+		else
+			configPrps[key] = value;
+	});
+
+	return {
+		configPrps,
+		passthroughPrps
+	};
+};
+
 //Export
 const buildProps = ({
 	prps,
@@ -20,12 +82,18 @@ const buildProps = ({
 	keyName = 'prps',
 	wrap = true,
 	isArray = false,
-	isInRowMda = false
+	isInRowMda = false,
+	debugPath = []
 }) => {
 	let combined = {};
 
 	if (prps)
 		Object.assign(combined, prps);
+
+	if (!isInRowMda && hasDynamicRowTraits(combined.rowMda)) {
+		combined.resolveDynamicTrait = 'resolveDynamicTrait';
+		setNeedsDynamicTraitResolver(true);
+	}
 
 	const lines = [];
 
@@ -34,9 +102,7 @@ const buildProps = ({
 		if (prps.srcAction && k !== 'srcAction')
 			return;
 
-		let key = k;
-		if (key[0] === '^' || key[0] === '.' || key.includes('-') || key.includes(' ') || key.includes('/'))
-			key = `"${key}"`;
+		const key = buildObjectKey(k);
 
 		let value = JSON.stringify(v);
 
@@ -53,9 +119,15 @@ const buildProps = ({
 			//srcAction (not srcActions) also supports passing extra arguments into handlers
 			if (k === 'srcAction' && Object.keys(prps).length > 1) {
 				const { srcAction, ...otherPrps } = prps;
+				const { configPrps, passthroughPrps } = splitScriptActionProps(otherPrps);
 
+				// srcAction JSON parameters belong under config; processAction control keys stay top-level.
+				const scriptActionPrps = {
+					...passthroughPrps,
+					config: configPrps
+				};
 				const scriptPrps = buildProps({
-					prps: otherPrps,
+					prps: scriptActionPrps,
 					wrap: false
 				});
 				lines.push(`handler: ${type}, ${scriptPrps}`);
@@ -89,7 +161,28 @@ const buildProps = ({
 				return;
 			}
 		} else if (isInRowMda && k === 'traits') {
+			if (isMustacheAccessor(v)) {
+				setNeedsDynamicTraitResolver(true);
+				lines.push(`${key}: ${JSON.stringify(v)}`);
+
+				return;
+			}
+
 			const traitsInfo = buildTraitsInfo(prps, { isInRowMda });
+
+			if (!traitsInfo) {
+				console.error('[opus-ui-transpiler] Failed to build traitsInfo while building rowMda props', {
+					file: getOriginalPath(),
+					propPath: [...debugPath, k].join('.'),
+					component: {
+						id: prps.id,
+						relId: prps.relId,
+						scope: prps.scope,
+						type: prps.type
+					},
+					traits: prps.traits
+				});
+			}
 
 			if (traitsInfo.mainTrait) {
 				const { type, path } = traitsInfo.mainTrait;
@@ -133,7 +226,9 @@ const buildProps = ({
 		}
 
 		if (vType === 'string') {
-			if (v[0] === '%' && v[v.length - 1] === '%') {
+			if (k === 'resolveDynamicTrait') {
+				value = v;
+			} else if (v[0] === '%' && v[v.length - 1] === '%') {
 				value = buildTraitPrpsAccessor(v.replaceAll('%', ''));
 			} else if (v[0] === '$' && v[v.length - 1] === '$') {
 				value = buildTraitPrpsAccessor(v.replaceAll('$', ''));
@@ -147,7 +242,9 @@ const buildProps = ({
 				if (value.indexOf('"{theme.') === 0 && value.indexOf('}"') === value.length - 2)
 					value = `getThemeValue('${value.replace('"{theme.', '').replace('}"', '')}')`;
 				else {
-					value = '`' + value.substring(1, value.length - 1).replaceAll('`', '\\`').replace(
+					value = '`' + escapeTemplateInterpolations(
+						value.substring(1, value.length - 1).replaceAll('`', '\\`')
+					).replace(
 						/\{theme\.([^}]+)\}/g,
 						(_, path) => `\${getThemeValue('${path}')}`
 					) + '`';
@@ -162,13 +259,15 @@ const buildProps = ({
 				prps: v,
 				wrap: false,
 				isArray: true,
-				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander'
+				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander',
+				debugPath: [...debugPath, k]
 			})}]`;
 		} else if (vType === 'object' && v !== null) {
 			value = `{${buildProps({
 				prps: v,
 				wrap: false,
-				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander'
+				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander',
+				debugPath: [...debugPath, k]
 			})}}`;
 		}
 

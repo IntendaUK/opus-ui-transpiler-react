@@ -1,0 +1,19 @@
+{
+	"acceptPrps": {
+		"caption": "string"
+	},
+	"prps": {
+		"scps": [
+			{
+				"id": "childScp",
+				"actions": [
+					{
+						"type": "setState",
+						"key": "cpt",
+						"value": "%caption%"
+					}
+				]
+			}
+		]
+	}
+}

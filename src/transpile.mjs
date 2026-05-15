@@ -193,6 +193,10 @@ const copyFolderContentsRecursive = (sourceFolder, destinationFolder, {
 
 		if (statSync(sourcePath).isDirectory()) {
 			const preserveWholeFolder = preservedPaths.includes(name);
+
+			if (preserveWholeFolder && existsSync(destinationPath))
+				return;
+
 			const nestedPreservedPaths = preservedPaths
 				.filter(preservedPath => isSameOrWithinPath(preservedPath, name) || isSameOrWithinPath(name, preservedPath))
 				.map(preservedPath => preservedPath === name

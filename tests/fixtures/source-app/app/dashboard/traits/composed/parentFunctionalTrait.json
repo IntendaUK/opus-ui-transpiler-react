@@ -1,0 +1,32 @@
+{
+	"acceptPrps": {
+		"caption": "string"
+	},
+	"prps": {
+		"classes": "parent-functional-trait"
+	},
+	"traits": [
+		{
+			"trait": "./childScpTrait",
+			"traitPrps": {
+				"caption": "%caption%"
+			}
+		},
+		"./childFlowTrait",
+		{
+			"trait": "./childWgtsTrait",
+			"traitPrps": {
+				"wgts": [
+					{
+						"prps": {
+							"cpt": "Widget with nested traits"
+						},
+						"traits": [
+							"./childFlowTrait"
+						]
+					}
+				]
+			}
+		}
+	]
+}

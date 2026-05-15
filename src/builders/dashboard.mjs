@@ -48,7 +48,7 @@ const dashboard = ({ path, contents }, mapFiles, dynamicRootTypes) => {
 
 	normalizeTraits(contents);
 
-	setOriginalFile(contents);
+	setOriginalFile(contents, path);
 
 	const hasMainTrait = !!identifyMainTrait(contents.traits);
 
