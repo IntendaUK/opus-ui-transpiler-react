@@ -68,6 +68,21 @@ const importGeneratedModule = async (sourceFile, extension = '.mjs') => {
 	}
 };
 
+//The component-type resolver reads the SOURCE app's node_modules, so tests must install the
+// component libraries their dashboards use. Each library is mocked the way the real Opus UI
+// packages are detected: a dist/components/<type> folder per provided component type. Created at
+// test time (under node_modules) rather than committed.
+const ensureMockComponentLibraries = (appRoot, libraries) => {
+	Object.entries(libraries).forEach(([packageName, componentTypes]) => {
+		componentTypes.forEach(componentType => {
+			const componentDir = join(appRoot, 'node_modules', packageName, 'dist', 'components', componentType);
+
+			mkdirSync(componentDir, { recursive: true });
+			writeFileSync(join(componentDir, 'index.js'), '//mock component library entry for transpiler tests\n', 'utf8');
+		});
+	});
+};
+
 const createHyphenTraitSourceApp = () => {
 	const sourceApp = join(tmpRoot, 'source-app-hyphen-trait');
 	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
@@ -145,6 +160,47 @@ const createDynamicRootTypeTraitSourceApp = () => {
 			prps: {
 				cpt: '%labelCpt%'
 			}
+		}]
+	}, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createRuntimeDynamicTypeSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-runtime-dynamic-type');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const traitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'dynamicRoot', 'runtimeDynamicType.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//Use the trait WITHOUT passing the dynamic types statically, so their concrete values are not
+	// discoverable at build time and must be resolved at runtime through the registry.
+	sampleDashboard.wgts.push({
+		id: 'runtimeDynamicTypeUsage',
+		traits: [{
+			trait: 'traits/dynamicRoot/runtimeDynamicType',
+			traitPrps: { labelCpt: 'Runtime dynamic type label' }
+		}]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+	mkdirSync(dirname(traitPath), { recursive: true });
+	//Root type is a runtime token (no discoverable values) and a NESTED wgt also uses a runtime token.
+	writeFileSync(traitPath, JSON.stringify({
+		acceptPrps: {
+			containerType: { type: 'string' },
+			innerType: { type: 'string' },
+			labelCpt: { type: 'string' }
+		},
+		type: '%containerType%',
+		prps: { dir: 'horizontal' },
+		wgts: [{
+			type: '%innerType%',
+			prps: { flex: true },
+			wgts: [{ type: 'label', prps: { cpt: '%labelCpt%' } }]
 		}]
 	}, null, '\t'), 'utf8');
 
@@ -240,6 +296,228 @@ const createRowMdaMustacheTraitsSourceApp = () => {
 			}
 		}
 	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createConditionalRootTypeSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-conditional-root-type');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const sectionTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'menu', 'sectionTrait.json');
+	const itemTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'menu', 'itemTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(sectionTraitPath), { recursive: true });
+	writeFileSync(sectionTraitPath, JSON.stringify({
+		type: 'container',
+		scope: 'menuSection',
+		acceptPrps: { rowData: 'object' },
+		prps: { padding: true },
+		wgts: [{ type: 'label', prps: { cpt: '%rowData.caption%' } }]
+	}, null, '\t'), 'utf8');
+	writeFileSync(itemTraitPath, JSON.stringify({
+		type: 'container',
+		scope: 'menuItem',
+		acceptPrps: { rowData: 'object' },
+		prps: { padding: true },
+		wgts: [{ type: 'label', prps: { cpt: '%rowData.caption%' } }]
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'conditionalRootTypeRepeater',
+		type: 'repeater',
+		prps: {
+			staticData: [
+				{ caption: 'Parent', children: [{}] },
+				{ caption: 'Leaf', children: [] }
+			],
+			rowMda: {
+				id: 'conditional-root-((rowNumber))',
+				prps: { flex: true },
+				traits: [
+					{
+						condition: { operator: 'isTruthy', value: '{{rowData.children.length}}' },
+						trait: 'traits/menu/sectionTrait',
+						traitPrps: { rowData: '{{rowData}}' }
+					},
+					{
+						condition: { operator: 'isFalsy', value: '{{rowData.children.length}}' },
+						trait: 'traits/menu/itemTrait',
+						traitPrps: { rowData: '{{rowData}}' }
+					}
+				]
+			}
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createEvalDollarTokenSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-eval-dollar-token');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const evalTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'eval', 'evalConditionTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(evalTraitPath), { recursive: true });
+	writeFileSync(evalTraitPath, JSON.stringify({
+		acceptPrps: { rowData: 'object' },
+		prps: {
+			canClick: true,
+			fireScript: {
+				id: 'sEDT',
+				actions: [{
+					actionCondition: {
+						operator: 'isTruthy',
+						//Embedded $rowData.prc_typ$ inside an eval expression must resolve to a
+						// quoted string literal, e.g. 'Explorer'.toLowerCase(), not a bare identifier.
+						value: "{{sEDT.eval.$rowData.prc_typ$.toLowerCase() === 'menu'}}"
+					},
+					type: 'setState',
+					target: '||menuTree||',
+					key: 'selectedDashboardData',
+					//Whole-value $rowData$ is a direct replace: the live object, not a string.
+					value: '$rowData$'
+				}]
+			}
+		}
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'evalDollarTokenComponent',
+		type: 'label',
+		prps: { cpt: 'Eval dollar token target' },
+		traits: [{
+			trait: 'traits/eval/evalConditionTrait',
+			traitPrps: { rowData: { prc_typ: 'Explorer' } }
+		}]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createRootArrayPrpsMergeSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-root-array-prps-merge');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const traitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'scps', 'scriptedContainer.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A typed component-trait that owns root-level array props (scps + flows). When this trait is
+	// used and the consumer also supplies scps/flows, Opus concatenates them. The generated root
+	// component spreads the caller's `...prps`, so its own scps/flows must be merged past that
+	// spread rather than clobbered (which would silently drop the component's own script).
+	mkdirSync(dirname(traitPath), { recursive: true });
+	writeFileSync(traitPath, JSON.stringify({
+		type: 'containerSimple',
+		scope: 'scriptedContainer',
+		acceptPrps: {},
+		prps: {
+			flex: true,
+			ownState: null,
+			scps: [
+				{
+					id: 'sOwn',
+					triggers: [{ event: 'onMount' }],
+					actions: [{ type: 'setState', key: 'ownState', value: true }]
+				}
+			],
+			flows: [
+				{ fromKey: 'ownState', toKey: 'ownMirror' }
+			]
+		}
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//The consumer supplies its own scps; at runtime Opus must keep both the trait's sOwn and this.
+	sampleDashboard.wgts.push({
+		id: 'scriptedContainerUsage',
+		traits: [{
+			trait: 'traits/scps/scriptedContainer',
+			traitPrps: {}
+		}],
+		prps: {
+			scps: [
+				{
+					id: 'sConsumer',
+					triggers: [{ event: 'onMount' }],
+					actions: [{ type: 'setState', key: 'consumerState', value: true }]
+				}
+			]
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createLocalComponentSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-local-component');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const componentPath = join(sourceApp, 'src', 'components', 'myWidget', 'index.jsx');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//An app-level component the app would register itself (registerComponentTypes), living in the
+	// application's own src/components folder rather than an @intenda package.
+	mkdirSync(dirname(componentPath), { recursive: true });
+	writeFileSync(componentPath, [
+		"import React from 'react';",
+		'',
+		'export const MyWidget = () => <div>my widget</div>;',
+		''
+	].join('\n'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'localComponentUsage',
+		type: 'myWidget',
+		prps: { flex: true }
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createComponentLibraryResolutionSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-component-library-resolution');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A scoped, non-base library and an unscoped one, both installed in the source app's node_modules.
+	ensureMockComponentLibraries(sourceApp, {
+		'@intenda/opus-ui-drag-move': ['dragger'],
+		'acme-components': ['fancyWidget']
+	});
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push(
+		{ id: 'scopedLibComponentUsage', type: 'dragger', prps: {} },
+		{ id: 'unscopedLibComponentUsage', type: 'fancyWidget', prps: {} }
+	);
 
 	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
 
@@ -579,6 +857,13 @@ before(() => {
 	rmSync(outputRoot, { recursive: true, force: true });
 	rmSync(tmpRoot, { recursive: true, force: true });
 
+	//The fixture's dashboards use these component types; declare the libraries that provide them in
+	// the fixture's node_modules so the source-app-based resolver can find them.
+	ensureMockComponentLibraries(fixtureSourceApp, {
+		'@intenda/opus-ui': ['container', 'containerSimple', 'label'],
+		'@intenda/opus-ui-components': ['label', 'repeater']
+	});
+
 	execFileSync(process.execPath, ['src/transpile.mjs'], {
 		cwd: process.cwd(),
 		env: {
@@ -652,6 +937,8 @@ test('generated non-main JSX files have expected React/export structure', () => 
 		.filter(file => extname(file) === '.jsx')
 		.filter(file => basename(file) !== 'main.jsx')
 		.filter(file => basename(file) !== 'helpers.jsx')
+		.filter(file => basename(file) !== 'conditionalRootType.jsx')
+		.filter(file => basename(file) !== 'dynamicTypeComponent.jsx')
 		.filter(file => basename(file) !== 'dynamicTraits.jsx')
 		.filter(file => {
 			const label = relative(outputSrc, file);
@@ -673,6 +960,73 @@ test('generated non-main JSX files have expected React/export structure', () => 
 		if (/const\s+spreadTrait\s*=/.test(contents))
 			assert.match(contents, /traitArray\s*:/, `Expected spread trait array in ${label}`);
 	});
+});
+
+test('generated dashboard resolves component types from the source app node_modules (scoped and unscoped)', () => {
+	const sourceApp = createComponentLibraryResolutionSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-component-library-resolution');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//A scoped, non-base component library is resolved from the source app's node_modules.
+	assert.match(dashboard, /import \{ Dragger \} from ["']@intenda\/opus-ui-drag-move["'];/);
+	assert.match(dashboard, /<Dragger/);
+
+	//An unscoped component library is resolved too.
+	assert.match(dashboard, /import \{ FancyWidget \} from ["']acme-components["'];/);
+	assert.match(dashboard, /<FancyWidget/);
+
+	assert.doesNotMatch(dashboard, /from ["']null["']/);
+});
+
+test('generated dashboard wraps app-level components via makeComponentWithChildren by type', () => {
+	const sourceApp = createLocalComponentSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-local-component');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//The custom type is rendered through the Opus UI wrapper by its registered type string, so the
+	// runtime supplies its state — not used as a raw, unwrapped component.
+	assert.match(dashboard, /import \{ makeComponentWithChildren \} from ["']@intenda\/opus-ui["'];/);
+	assert.match(dashboard, /const MyWidget = makeComponentWithChildren\(["']myWidget["']\);/);
+	assert.match(dashboard, /<MyWidget/);
+
+	//It must NOT be imported as a raw component module (that bypasses the wrapper) nor 'null'.
+	assert.doesNotMatch(dashboard, /import \{ MyWidget \} from ["'][^"']*components\/myWidget["'];/);
+	assert.doesNotMatch(dashboard, /from ["']null["']/);
+
+	//The raw component is still carried through to the target; it is registered at runtime.
+	assertFileExists(join(targetApp, 'src', 'components', 'myWidget', 'index.jsx'));
 });
 
 test('generated dashboard supports rowMda traits', () => {
@@ -773,10 +1127,95 @@ test('generated typed trait uses targeted token replacement in sysPrps and prps'
 	assert.match(dashboard, /<TraitsTokensTargetedTokenTrait\s+id="targetedTokenTraitUsage"[\s\S]*traitPrps=\{\{[\s\S]*id: "targetedId"[\s\S]*caption: "Targeted token caption"[\s\S]*color: "primary"[\s\S]*details: \{ name: "Nested token source" \}[\s\S]*\}\}/);
 
 	assert.match(targetedTokenTrait, /id=\{`token-\$\{getDeepProperty\(traitPrps, ["']id["']\)\}-suffix`\}/);
-	assert.match(targetedTokenTrait, /cpt:\s*`Hello \$\{getDeepProperty\(traitPrps, ["']caption["']\)\} from \$\{getDeepProperty\(traitPrps, ["']details\.name["']\)\}`/);
+	//Embedded %caption% injects raw; embedded $details.name$ is JSON.stringified, mirroring
+	// the runtime's getMorphedString (% raw, $ quoted).
+	assert.match(targetedTokenTrait, /cpt:\s*`Hello \$\{getDeepProperty\(traitPrps, ["']caption["']\)\} from \$\{JSON\.stringify\(getDeepProperty\(traitPrps, ["']details\.name["']\)\)\}`/);
 	assert.match(targetedTokenTrait, /color:\s*traitPrps\.color/);
 	assert.doesNotMatch(targetedTokenTrait, /"%caption%"/);
 	assert.doesNotMatch(targetedTokenTrait, /"\$color\$"/);
+});
+
+test('generated trait quotes embedded $token$ inside eval expressions', () => {
+	const sourceApp = createEvalDollarTokenSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-eval-dollar-token');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const evalTrait = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'eval', 'evalConditionTrait.jsx'),
+		'utf8'
+	);
+
+	//Embedded $rowData.prc_typ$ must be JSON.stringified so it lands as a quoted literal in eval.
+	assert.match(
+		evalTrait,
+		/\$\{JSON\.stringify\(getDeepProperty\(traitPrps, ["']rowData\.prc_typ["']\)\)\}\.toLowerCase\(\) === 'menu'/
+	);
+
+	//It must NOT emit the bare-identifier form that crashed at runtime (Explorer is not defined).
+	assert.doesNotMatch(evalTrait, /\$\{getDeepProperty\(traitPrps, ["']rowData\.prc_typ["']\)\}\.toLowerCase/);
+
+	//Whole-value $rowData$ stays a direct accessor to the live object (no quoting).
+	assert.match(evalTrait, /value:\s*traitPrps\.rowData\b/);
+});
+
+test('generated root trait merges its own array props with the caller-supplied prps', () => {
+	const sourceApp = createRootArrayPrpsMergeSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-root-array-prps-merge');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const trait = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'scps', 'scriptedContainer.jsx'),
+		'utf8'
+	);
+
+	//The component still spreads the caller's props.
+	const spreadIndex = trait.indexOf('...prps');
+	assert.ok(spreadIndex !== -1, 'Expected the root trait to spread the caller prps (...prps)');
+
+	//Array-typed Opus props (scps, flows) are merged with the caller's value rather than overwritten,
+	// and that merge is emitted AFTER the spread so `...prps` cannot clobber the component's own.
+	assert.match(trait, /scps:\s*\[\s*\.\.\.\(prps\?\.scps \?\? \[\]\),\s*\.\.\.\[/);
+	assert.match(trait, /flows:\s*\[\s*\.\.\.\(prps\?\.flows \?\? \[\]\),\s*\.\.\.\[/);
+
+	const scpsMergeIndex = trait.search(/scps:\s*\[\s*\.\.\.\(prps\?\.scps/);
+	const flowsMergeIndex = trait.search(/flows:\s*\[\s*\.\.\.\(prps\?\.flows/);
+	assert.ok(scpsMergeIndex > spreadIndex, 'Merged scps must be emitted after the ...prps spread');
+	assert.ok(flowsMergeIndex > spreadIndex, 'Merged flows must be emitted after the ...prps spread');
+
+	//The component's own script id must still be present in the emitted (merged) scps.
+	assert.match(trait, /id:\s*["']sOwn["']/);
+
+	//Scalar props are still plain overrides (not array-merged) and remain before the spread.
+	const ownStateIndex = trait.indexOf('ownState: null');
+	assert.ok(ownStateIndex !== -1 && ownStateIndex < spreadIndex, 'Scalar props remain before the spread and are overridable');
 });
 
 test('generated typed trait replaces root scope token with trait prop accessor', () => {
@@ -1093,6 +1532,47 @@ test('generated typed trait supports dynamic root type from traitPrps', () => {
 	assert.doesNotMatch(contents, /from ["']null["']/);
 });
 
+test('generated dynamic component types resolve at runtime when not statically discoverable', () => {
+	const sourceApp = createRuntimeDynamicTypeSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-runtime-dynamic-type');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const trait = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'dynamicRoot', 'runtimeDynamicType.jsx'),
+		'utf8'
+	);
+
+	//The shared runtime wrapper is imported and used for BOTH the root and the nested dynamic type,
+	// resolving the type through the registry by the runtime trait-prop value.
+	assert.match(trait, /import \{ DynamicTypeComponent \} from ["'](?:\.\.\/)+dynamicTypeComponent["'];/);
+	assert.match(trait, /<DynamicTypeComponent\s+type=\{traitPrps\.containerType\}/);
+	assert.match(trait, /<DynamicTypeComponent\s+type=\{traitPrps\.innerType\}/);
+
+	//No raw token leaks into a tag/import.
+	assert.doesNotMatch(trait, /%containerType%|%innerType%/);
+	assert.doesNotMatch(trait, /from ["']null["']/);
+
+	//The shared helper module is generated and renders via the registry.
+	const helper = readFileSync(join(targetApp, 'src', 'dynamicTypeComponent.jsx'), 'utf8');
+
+	assert.match(helper, /export const DynamicTypeComponent =/);
+	assert.match(helper, /makeComponentWithChildren\(type\)/);
+});
+
 test('generated trait prop token paths support numeric array segments', () => {
 	const sourceApp = createNumericTraitPathSourceApp();
 	const targetApp = join(tmpRoot, 'target-app-numeric-trait-path');
@@ -1215,6 +1695,56 @@ test('generated rowMda preserves mustache rowData traits for repeater runtime', 
 	assert.match(dashboard, /import \{ resolveDynamicTrait \} from ["']\.\.\/dynamicTraits["'];/);
 	assert.match(dashboard, /traits:\s*"{{rowData\.traits}}"/);
 	assert.match(dashboard, /resolveDynamicTrait:\s*resolveDynamicTrait/);
+});
+
+test('generated rowMda with conditioned visual traits emits a per-row conditional component selector', () => {
+	const sourceApp = createConditionalRootTypeSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-conditional-root-type');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//Both alternatives must be imported as component blueprints...
+	assert.match(dashboard, /import TraitsMenuSectionTrait from ["']\.\/traits\/menu\/sectionTrait["'];/);
+	assert.match(dashboard, /import TraitsMenuItemTrait from ["']\.\/traits\/menu\/itemTrait["'];/);
+	//...and the shared dispatcher pulled in.
+	assert.match(dashboard, /import \{ renderConditionalRootType \} from ["']\.\.\/conditionalRootType["'];/);
+
+	assert.match(dashboard, /id="conditionalRootTypeRepeater"/);
+
+	//The node component is the dispatcher, not one fixed branch.
+	assert.match(dashboard, /type:\s*renderConditionalRootType/);
+
+	//Both conditioned alternatives are emitted with their (runtime-resolved) conditions intact.
+	// (\s tolerates Prettier's line breaks; ,? tolerates trailing commas.)
+	assert.match(dashboard, /conditionalRootTypes:\s*\[/);
+	assert.match(dashboard, /operator:\s*"isTruthy",\s*value:\s*"\{\{rowData\.children\.length\}\}",?\s*\},\s*type:\s*TraitsMenuSectionTrait,\s*traitPrps:\s*\{\s*rowData:\s*"\{\{rowData\}\}",?\s*\}/);
+	assert.match(dashboard, /operator:\s*"isFalsy",\s*value:\s*"\{\{rowData\.children\.length\}\}",?\s*\},\s*type:\s*TraitsMenuItemTrait,\s*traitPrps:\s*\{\s*rowData:\s*"\{\{rowData\}\}",?\s*\}/);
+
+	//The conditional selector must not collapse into the old "one main type + traits: [...]" form.
+	assert.doesNotMatch(dashboard, /id="conditionalRootTypeRepeater"[\s\S]*?rowMda:[\s\S]*?traits:\s*\[/);
+
+	//The shared dispatcher module is generated and renders React.
+	const dispatcher = readFileSync(join(targetApp, 'src', 'conditionalRootType.jsx'), 'utf8');
+
+	assert.match(dispatcher, /import React from ["']react["'];/);
+	assert.match(dispatcher, /import \{ isConditionMet \} from ["']@intenda\/opus-ui["'];/);
+	assert.match(dispatcher, /export const renderConditionalRootType =/);
+	assert.match(dispatcher, /conditionalRootTypes\.find\(\(?entry\)?\s*=>\s*isConditionMet\(entry\.condition\)/);
 });
 
 test('generated functional trait de-duplicates imports for repeated srcAction handlers', () => {
@@ -1414,7 +1944,9 @@ test('generated functional trait replaces dollar trait prop tokens after inline 
 		'utf8'
 	);
 
-	assert.match(contents, /if \(\$\{getDeepProperty\(traitPrps, ["']flag["']\)\}\)/);
+	//Embedded $flag$ sits inside an {{eval...}} expression, so it is JSON.stringified (quoted)
+	// to mirror the runtime's getMorphedString $-token behaviour.
+	assert.match(contents, /if \(\$\{JSON\.stringify\(getDeepProperty\(traitPrps, ["']flag["']\)\)\}\)/);
 	assert.match(contents, /res\.width = \$\{getThemeValue\(["']colors\.primary["']\)\};/);
 	assert.doesNotMatch(contents, /\$flag\$/);
 });

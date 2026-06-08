@@ -64,6 +64,48 @@ const template = `
 	};
 `;
 
+//This lives in its own JSX module (kept separate from the plain-JS helpers above) because
+// it renders React elements. Per row, it picks the correct node component from a set of
+// conditioned alternatives. Each entry's condition is resolved against the row's data by the
+// repeater/treeview runtime before this renders, so isConditionMet receives concrete values.
+const conditionalRootTypeTemplate = `
+	import React from 'react';
+	import { isConditionMet } from '@intenda/opus-ui';
+
+	export const renderConditionalRootType = ({ conditionalRootTypes = [], ...rest }) => {
+		const match = conditionalRootTypes.find(entry => isConditionMet(entry.condition));
+
+		if (!match)
+			return null;
+
+		const Type = match.type;
+
+		return <Type {...rest} traitPrps={match.traitPrps} />;
+	};
+`;
+
+//Renders a component whose type is only known at runtime (a %token%/$token$ type resolved from a
+// trait prop). The type string is resolved through the Opus UI component registry the same way the
+// runtime resolves dynamic types; wrapped components are cached per type for stable identity.
+const dynamicTypeComponentTemplate = `
+	import React from 'react';
+	import { makeComponentWithChildren } from '@intenda/opus-ui';
+
+	const dynamicTypeCache = {};
+
+	export const DynamicTypeComponent = ({ type, ...rest }) => {
+		if (!type)
+			return null;
+
+		if (!dynamicTypeCache[type])
+			dynamicTypeCache[type] = makeComponentWithChildren(type);
+
+		const Component = dynamicTypeCache[type];
+
+		return <Component {...rest} />;
+	};
+`;
+
 //Builder
 const buildHelpers = () => {
 	const outputPath = join('output', 'src', 'helpers.jsx');
@@ -71,6 +113,14 @@ const buildHelpers = () => {
 	mkdirSync(dirname(outputPath), { recursive: true });
 
 	writeFileSync(outputPath, template, 'utf8');
+
+	const conditionalRootTypePath = join('output', 'src', 'conditionalRootType.jsx');
+
+	writeFileSync(conditionalRootTypePath, conditionalRootTypeTemplate, 'utf8');
+
+	const dynamicTypeComponentPath = join('output', 'src', 'dynamicTypeComponent.jsx');
+
+	writeFileSync(dynamicTypeComponentPath, dynamicTypeComponentTemplate, 'utf8');
 };
 
 export default buildHelpers;

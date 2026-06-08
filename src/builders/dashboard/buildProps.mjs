@@ -3,13 +3,14 @@ import { getIsTrait } from './isTrait.mjs';
 import { getOriginalPath } from './originalFile.mjs';
 import { pushToScriptImports } from './scriptImports.mjs';
 import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
-import { setNeedsDynamicTraitResolver } from './generateImports.mjs';
+import { setNeedsDynamicTraitResolver, setNeedsConditionalRootType } from './generateImports.mjs';
 import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
 
 //Helpers
 import buildTraitsInfo from './buildTraitsInfo.mjs';
 import findComponentLibraryName from './findComponentLibraryName.mjs';
+import findLocalComponentPath from './findLocalComponentPath.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 import pathToIdentifier from '../pathToIdentifier.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
@@ -48,6 +49,20 @@ const buildObjectKey = key => {
 };
 
 const escapeTemplateInterpolations = value => value.replace(/(?<!\\)\$\{/g, '\\${');
+
+//Opus treats these prop types as arrays that are concatenated (not replaced) when a node and a
+// trait/consumer both supply them — see the `arrayPrps` list in the generated `applyTraits` helper.
+// A root component spreads the caller's `...prps` over its own defaults, so without special handling
+// a parent passing any of these would clobber the component's built-in value (e.g. dropping the
+// component's own `scps`, silently disabling its scripts). We merge them instead.
+const ARRAY_MERGE_PRPS = [
+	'scps',
+	'flows',
+	'morphProps',
+	'lookupFilters',
+	'lookupFlows',
+	'traitMappings'
+];
 
 const scriptActionPassthroughKeys = new Set([
 	'actionCondition',
@@ -96,6 +111,11 @@ const buildProps = ({
 	}
 
 	const lines = [];
+
+	//A root trait component receives the caller's props via a `...prps` spread. Array-typed Opus
+	// props must survive that spread by being merged, so we defer them past `...prps` (see below).
+	const isRootTrait = isRootLevel && getIsTrait() && !getIsFunctionalTrait();
+	const mergedArrayLines = [];
 
 	Object.entries(combined).forEach(([k, v]) => {
 		//If we're in a script action that has a handler, ignore all other prps
@@ -150,7 +170,9 @@ const buildProps = ({
 		const vType = typeof(v);
 
 		if (isInRowMda && k === 'type') {
-			const componentLibrary = findComponentLibraryName(v);
+			//A local app component (src/components/<type>) is just as valid a row component type
+			// as a library component, so accept either.
+			const componentLibrary = findLocalComponentPath(v) || findComponentLibraryName(v);
 
 			if (componentLibrary) {
 				if (!getUsedComponentTypes().includes(v))
@@ -182,6 +204,45 @@ const buildProps = ({
 					},
 					traits: prps.traits
 				});
+			}
+
+			//A conditional component selector: two or more visual traits each guarded by a
+			// condition. The runtime cannot switch the node component via the `traits` array
+			// (it invokes those entries as functional traits), so emit a single dispatching
+			// `type` plus a `conditionalRootTypes` list whose conditions are resolved per row.
+			const conditionalRootTypeTraits = [traitsInfo.mainTrait, ...traitsInfo.otherTraits]
+				.filter(t => t && t.type && t.contents?.type && t.condition);
+
+			if (conditionalRootTypeTraits.length > 1) {
+				setNeedsConditionalRootType(true);
+
+				const entries = conditionalRootTypeTraits.map(({ type, path, condition, traitPrps }) => {
+					if (!getTraitImports().some(f => f.type === type)) {
+						pushToTraitImports({
+							type,
+							path
+						});
+					}
+
+					const conditionString = buildProps({
+						prps: condition,
+						wrap: false,
+						isInRowMda
+					});
+
+					const traitPrpsString = buildProps({
+						prps: traitPrps,
+						wrap: false,
+						isInRowMda
+					});
+
+					return `{ condition: {${conditionString}}, type: ${type}, traitPrps: {${traitPrpsString}} }`;
+				});
+
+				lines.push('type: renderConditionalRootType');
+				lines.push(`conditionalRootTypes: [${entries.join(', ')}]`);
+
+				return;
 			}
 
 			if (traitsInfo.mainTrait) {
@@ -271,14 +332,22 @@ const buildProps = ({
 			})}}`;
 		}
 
-		if (!isArray)
-			lines.push(`${key}: ${value}`);
-		else
+		if (isArray)
 			lines.push(value);
+		else if (isRootTrait && ARRAY_MERGE_PRPS.includes(k)) {
+			//Defer past `...prps` and merge the caller's value with the component's own, so a parent
+			// passing this prop augments the component's built-in array rather than replacing it.
+			mergedArrayLines.push(`${key}: [...(prps?.${k} ?? []), ...${value}]`);
+		} else
+			lines.push(`${key}: ${value}`);
 	});
 
-	if (isRootLevel && getIsTrait() && !getIsFunctionalTrait())
+	if (isRootTrait) {
 		lines.push('...prps');
+
+		//Re-apply the merged array props after the spread so the caller's `...prps` can't clobber them.
+		lines.push(...mergedArrayLines);
+	}
 
 	if (lines.length === 0)
 		return '';

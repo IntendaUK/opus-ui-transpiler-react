@@ -1,12 +1,16 @@
 import { getIsTrait } from './isTrait.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
 
+// Mirrors the runtime's getMorphedString (blueprintManager.js): an embedded %token%
+// injects the raw value, while an embedded $token$ injects the JSON.stringified value
+// (so string values land as valid quoted literals inside eval expressions). A whole-value
+// $token$/%token% is handled separately in injectTraitPrpsInString as a direct accessor.
 const replaceTraitPropTokens = rawValue => rawValue
 	.replace(/%([A-Za-z0-9][^%]*[A-Za-z0-9])%/g, (_, token) => {
 		return `\${getDeepProperty(traitPrps, '${token}')}`;
 	})
 	.replace(/\$([A-Za-z0-9](?:[^$]*[A-Za-z0-9])?)\$/g, (_, token) => {
-		return `\${getDeepProperty(traitPrps, '${token}')}`;
+		return `\${JSON.stringify(getDeepProperty(traitPrps, '${token}'))}`;
 	});
 
 // This function is called with a value already wrapped in a JS string literal,

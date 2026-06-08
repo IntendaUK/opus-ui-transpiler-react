@@ -7,6 +7,7 @@ import { getMapFilesEntry } from './mapFiles.mjs';
 
 //Helpers
 import findComponentLibraryName from './findComponentLibraryName.mjs';
+import findLocalComponentPath from './findLocalComponentPath.mjs';
 
 //Internal
 
@@ -14,6 +15,8 @@ import findComponentLibraryName from './findComponentLibraryName.mjs';
 let currentPath;
 let needsHelpers = false;
 let needsDynamicTraitResolver = false;
+let needsConditionalRootType = false;
+let needsDynamicTypeComponent = false;
 
 const getRelativeImportPath = (currentPath, targetPath) => {
 	const currentParts = currentPath.split('/');
@@ -56,6 +59,8 @@ export const initGenerateImports = ({ currentPath: _currentPath }) => {
 	currentPath = _currentPath;
 	needsHelpers = false;
 	needsDynamicTraitResolver = false;
+	needsConditionalRootType = false;
+	needsDynamicTypeComponent = false;
 };
 
 export const setNeedsHelpers = _needsHelpers => {
@@ -66,11 +71,35 @@ export const setNeedsDynamicTraitResolver = _needsDynamicTraitResolver => {
 	needsDynamicTraitResolver = _needsDynamicTraitResolver;
 };
 
+export const setNeedsConditionalRootType = _needsConditionalRootType => {
+	needsConditionalRootType = _needsConditionalRootType;
+};
+
+export const setNeedsDynamicTypeComponent = _needsDynamicTypeComponent => {
+	needsDynamicTypeComponent = _needsDynamicTypeComponent;
+};
+
 const generateImports = () => {
 	const trackedImports = {};
+	const localComponentTypes = [];
 
 	getUsedComponentTypes().forEach(type => {
+		//Local components (the app's own src/components/<type>) take precedence over @intenda
+		// library components of the same type, mirroring registerComponentTypes overrides in main.jsx.
+		// They are rendered through the Opus UI wrapper by type string (like the library's own
+		// components) so the runtime resolves the registered component and supplies its state.
+		const localComponentPath = findLocalComponentPath(type);
+
+		if (localComponentPath) {
+			localComponentTypes.push(type);
+
+			return;
+		}
+
 		const componentLibrary = findComponentLibraryName(type);
+
+		if (!componentLibrary)
+			console.warn(`[opus-ui-transpiler] Could not resolve component type "${type}" to an @intenda library or a local components/ folder`);
 
 		if (!trackedImports[componentLibrary])
 			trackedImports[componentLibrary] = [type];
@@ -85,6 +114,9 @@ const generateImports = () => {
 
 				return `import { ${componentTypes.join(', ')} } from '${k}';`;
 			}),
+		...(localComponentTypes.length
+			? ["import { makeComponentWithChildren } from '@intenda/opus-ui';"]
+			: []),
 		'\n\n',
 		...getTraitImports()
 			.map(({ type, path }) => {
@@ -108,6 +140,18 @@ const generateImports = () => {
 		res.push(`import { applyTraits } from '${relativePath}';`);
 	}
 
+	if (needsConditionalRootType) {
+		const relativePath = getRelativeImportPath(currentPath, 'conditionalRootType');
+
+		res.push(`import { renderConditionalRootType } from '${relativePath}';`);
+	}
+
+	if (needsDynamicTypeComponent) {
+		const relativePath = getRelativeImportPath(currentPath, 'dynamicTypeComponent');
+
+		res.push(`import { DynamicTypeComponent } from '${relativePath}';`);
+	}
+
 	if (needsDynamicTraitResolver) {
 		const relativePath = getRelativeImportPath(currentPath, 'dynamicTraits');
 
@@ -120,6 +164,14 @@ const generateImports = () => {
 			.join(', ');
 
 		res.push(`const ${name} = { ${entries} };`);
+	});
+
+	//Wrap each local component by its registered type string so it renders through the Opus UI
+	// Wrapper (which supplies state/handlers) instead of being used as a raw, unwrapped component.
+	localComponentTypes.forEach(type => {
+		const name = type[0].toUpperCase() + type.substring(1);
+
+		res.push(`const ${name} = makeComponentWithChildren('${type}');`);
 	});
 
 	return res.join('');

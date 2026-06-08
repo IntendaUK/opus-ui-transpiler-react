@@ -1,5 +1,5 @@
 //Getters / Setters
-import { setNeedsDynamicTraitResolver, setNeedsHelpers } from './generateImports.mjs';
+import { setNeedsDynamicTraitResolver, setNeedsHelpers, setNeedsDynamicTypeComponent } from './generateImports.mjs';
 import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
 import { getDynamicRootTypeInfo, registerDynamicRootTypeComponentMap } from './dynamicRootTypes.mjs';
@@ -9,6 +9,12 @@ import buildProps from './buildProps.mjs';
 import buildTraitsInfo from './buildTraitsInfo.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
+
+//A %token%/$token$ used as a component type means the type is resolved at runtime from a trait prop.
+const isDynamicTypeToken = value => typeof(value) === 'string' &&
+	((value.startsWith('%') && value.endsWith('%')) || (value.startsWith('$') && value.endsWith('$')));
+
+const getDynamicTypeName = token => token.slice(1, -1);
 
 const buildFunctionalTraitPrps = traitPrps => {
 	const propsString = buildProps({
@@ -89,6 +95,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 
 	let componentType;
 	let dynamicRootType;
+	let dynamicTypeAccessor;
 
 	const traitsInfo = buildTraitsInfo(obj, { isInRowMda: false });
 	const hasFunctionalTraits = traitsInfo?.otherTraits.length > 0;
@@ -104,6 +111,11 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 
 		dynamicRootType = getDynamicRootTypeInfo(type);
 
+		//Only use the static component map when concrete type values were actually discovered from
+		// external trait usages; otherwise it would be an empty map that resolves to nothing.
+		if (!(dynamicRootType && dynamicRootType.values.length))
+			dynamicRootType = undefined;
+
 		if (dynamicRootType) {
 			dynamicRootType.values.forEach(value => {
 				if (!getUsedComponentTypes().includes(value))
@@ -111,6 +123,13 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 			});
 
 			componentType = 'DynamicRootTypeComponent';
+		} else if (isDynamicTypeToken(type)) {
+			//Type known only at runtime (root with no discoverable values, or any nested token):
+			// render through the runtime component registry by the resolved type string.
+			dynamicTypeAccessor = buildTraitPrpsAccessor(getDynamicTypeName(type));
+			componentType = 'DynamicTypeComponent';
+
+			setNeedsDynamicTypeComponent(true);
 		} else {
 			componentType = type[0].toUpperCase() + type.substring(1);
 
@@ -222,7 +241,9 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 			res = `prps: { ${prpsString} }`;
 	}
 	else {
-		let inner = `<${componentType} ${traitsString} ${sysPrpsString} ${mainTraitPrpsString} ${prpsString} ${restString}>${children.join('')}</${componentType}>`;
+		const dynamicTypeProp = dynamicTypeAccessor ? `type={${dynamicTypeAccessor}}` : '';
+
+		let inner = `<${componentType} ${dynamicTypeProp} ${traitsString} ${sysPrpsString} ${mainTraitPrpsString} ${prpsString} ${restString}>${children.join('')}</${componentType}>`;
 
 		if (dynamicRootType) {
 			const mapName = registerDynamicRootTypeComponentMap(dynamicRootType.values);
