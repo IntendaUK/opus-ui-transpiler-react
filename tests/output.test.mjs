@@ -6,6 +6,8 @@ import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { before, test } from 'node:test';
 
+import { transformTraitReferences } from '../src/builders/scriptAction.mjs';
+
 const outputRoot = resolve('output');
 const outputSrc = join(outputRoot, 'src');
 const fixtureSourceApp = resolve('tests', 'fixtures', 'source-app');
@@ -464,6 +466,318 @@ const createRootArrayPrpsMergeSourceApp = () => {
 	});
 
 	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createHandlerExtraWgtsSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-handler-extra-wgts');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const rowComponentPath = join(sourceApp, 'app', 'dashboard', 'traits', 'extraWgtsRow', 'rowComponent.json');
+	const wrapperComponentPath = join(sourceApp, 'app', 'dashboard', 'traits', 'extraWgtsRow', 'wrapperComponent.json');
+	const handlerPath = join(sourceApp, 'app', 'dashboard', 'scriptActions', 'buildExtraWgtsRow.js');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A typed component-trait that a handler injects into extraWgts at runtime.
+	mkdirSync(dirname(rowComponentPath), { recursive: true });
+	writeFileSync(rowComponentPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { label: 'string' },
+		prps: { cpt: '%label%' }
+	}, null, '\t'), 'utf8');
+
+	//A component-trait with NO own type — it is a component only via its main trait. The handler
+	// transform must still recognise it as a component (so it is converted to a direct import).
+	writeFileSync(wrapperComponentPath, JSON.stringify({
+		acceptPrps: {},
+		traits: [{ trait: 'traits/extraWgtsRow/rowComponent', traitPrps: { label: 'wrapped' } }]
+	}, null, '\t'), 'utf8');
+
+	//A handler that builds widgets referencing those component-traits by path and pushes them into
+	// extraWgts. The transpiler must rewrite each trait-path string into a direct component import.
+	mkdirSync(dirname(handlerPath), { recursive: true });
+	writeFileSync(handlerPath, [
+		'const buildExtraWgtsRow = ({ setState }) => {',
+		'  setState({',
+		'    extraWgts: [',
+		"      { id: 'extra-row-0', traits: [{ trait: '../traits/extraWgtsRow/rowComponent', traitPrps: { label: 'Injected' } }], prps: {} },",
+		"      { id: 'extra-wrap-0', traits: [{ trait: '../traits/extraWgtsRow/wrapperComponent', traitPrps: {} }], prps: {} }",
+		'    ]',
+		'  });',
+		'};',
+		'',
+		'export default buildExtraWgtsRow;',
+		''
+	].join('\n'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//Reference the handler so it is included in the build.
+	sampleDashboard.wgts.push({
+		id: 'extraWgtsHost',
+		type: 'containerSimple',
+		prps: {
+			scps: [{
+				triggers: [{ event: 'onMount' }],
+				actions: [{ srcAction: 'scriptActions/buildExtraWgtsRow' }]
+			}]
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createActionExtraWgtsSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-action-extra-wgts');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const rowComponentPath = join(sourceApp, 'app', 'dashboard', 'traits', 'extraWgtsRow', 'rowComponent.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(rowComponentPath), { recursive: true });
+	writeFileSync(rowComponentPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { label: 'string' },
+		prps: { cpt: '%label%' }
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//A node whose scripts build extraWgts both inline (setState value) and via mapArray (mapTo),
+	// each referencing a component-trait by path. The transpiler must convert those references.
+	sampleDashboard.wgts.push({
+		id: 'actionExtraWgtsHost',
+		type: 'containerSimple',
+		prps: {
+			scps: [{
+				triggers: [{ event: 'onMount' }],
+				actions: [
+					{
+						type: 'mapArray',
+						value: '{{state.self.items}}',
+						mapTo: {
+							traits: [{ trait: 'traits/extraWgtsRow/rowComponent', traitPrps: { label: 'mapped' } }],
+							prps: {}
+						},
+						storeAsVariable: 'rows'
+					},
+					{
+						type: 'setState',
+						key: 'extraWgts',
+						value: {
+							id: 'inline-row',
+							traits: [{ trait: 'traits/extraWgtsRow/rowComponent', traitPrps: { label: 'inline' } }],
+							prps: {}
+						}
+					}
+				]
+			}]
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createNestedTabContentsTraitRefSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-nested-tab-contents-trait-ref');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const pageTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'page', 'index.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(pageTraitPath), { recursive: true });
+	writeFileSync(pageTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: {},
+		prps: { flex: true }
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//A component-trait reference nested deep under a non-render key (tOpenTab.value.tabContents.traits)
+	// — not caught by key-based detection, only by the final catch-all output pass.
+	sampleDashboard.wgts.push({
+		id: 'tabOpener',
+		type: 'containerSimple',
+		prps: {
+			canClick: true,
+			fireScript: {
+				actions: [{
+					type: 'setState',
+					target: 'appTabManager',
+					key: 'tOpenTab',
+					value: {
+						tabId: 'page-tab',
+						tabContents: {
+							traits: [{ trait: '@myEnsemble/page/index', traitPrps: {} }]
+						}
+					}
+				}]
+			}
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createDuplicateImportSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-duplicate-import');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const sharedTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'shared', 'index.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(sharedTraitPath), { recursive: true });
+	writeFileSync(sharedTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: {},
+		prps: { flex: true }
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//Node A uses the trait statically (the transpiler imports it, concatenated mid-line).
+	sampleDashboard.wgts.push({
+		id: 'staticUse',
+		traits: [{ trait: '@myEnsemble/shared/index', traitPrps: {} }]
+	});
+
+	//Node B references the SAME trait nested under tabContents (only the catch-all pass converts it).
+	// The pass must reuse the existing import rather than declare a duplicate.
+	sampleDashboard.wgts.push({
+		id: 'opener',
+		type: 'containerSimple',
+		prps: {
+			canClick: true,
+			fireScript: {
+				actions: [{
+					type: 'setState',
+					target: 'appTabManager',
+					key: 'tOpenTab',
+					value: { tabContents: { traits: [{ trait: '@myEnsemble/shared/index', traitPrps: {} }] } }
+				}]
+			}
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createRowMdaOwnTypePlusMainTraitSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-rowmda-type-main-trait');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const typedTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'row', 'typedRowTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A type-bearing component trait.
+	mkdirSync(dirname(typedTraitPath), { recursive: true });
+	writeFileSync(typedTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: {},
+		prps: { flex: true }
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//A repeater whose rowMda node has BOTH its own type AND a type-bearing main trait. The trait's
+	// type overrides the node's, so the transpiler must emit only one `type` (no duplicate key).
+	sampleDashboard.wgts.push({
+		id: 'typeAndTraitRepeater',
+		type: 'repeater',
+		prps: {
+			staticData: [{}],
+			rowMda: {
+				id: 'row-((rowNumber))',
+				type: 'containerSimple',
+				traits: [{ trait: 'traits/row/typedRowTrait', traitPrps: {} }]
+			}
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createMorphEvalBacktickSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-morph-eval-backtick');
+	const traitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'morph', 'subLabelTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A morph accept-prop whose eval contains a JS template literal (backticks + ${}) and NO %/$
+	// tokens. The morpher converts double-quoted values to backtick templates, so those literal
+	// backticks/${ must be escaped or the generated module is a syntax error.
+	mkdirSync(dirname(traitPath), { recursive: true });
+	writeFileSync(traitPath, JSON.stringify({
+		type: 'label',
+		acceptPrps: {
+			subLabel: {
+				morph: true,
+				morphVariable: 'res',
+				morphActions: [
+					{ type: 'setVariable', name: 'res', value: "{{eval. const res = 'x'; `(${res})`; }}" }
+				]
+			}
+		},
+		prps: { cpt: '%subLabel%' }
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+	sampleDashboard.wgts.push({
+		id: 'subLabelUsage',
+		traits: [{ trait: 'traits/morph/subLabelTrait', traitPrps: {} }]
+	});
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createLocalComponentTraitRefSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-local-component-trait-ref');
+	const rowTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'row', 'index.json');
+	const localComponentPath = join(sourceApp, 'src', 'components', 'myWidget', 'buildWgts.js');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A component-trait under an @ensemble path (mirrors how real ensembles are referenced).
+	mkdirSync(dirname(rowTraitPath), { recursive: true });
+	writeFileSync(rowTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { label: 'string' },
+		prps: { cpt: '%label%' }
+	}, null, '\t'), 'utf8');
+
+	//A hand-written local component (copied verbatim, not transpiled) that builds a widget referencing
+	// that component-trait by path. The transpiler must rewrite the path string into a direct import.
+	mkdirSync(dirname(localComponentPath), { recursive: true });
+	writeFileSync(localComponentPath, [
+		'const buildWgts = () => ({',
+		"  traits: [{ trait: '@myEnsemble/row/index', traitPrps: { label: 'Local' } }],",
+		'  prps: {}',
+		'});',
+		'',
+		'export default buildWgts;',
+		''
+	].join('\n'), 'utf8');
 
 	return sourceApp;
 };
@@ -1218,6 +1532,229 @@ test('generated root trait merges its own array props with the caller-supplied p
 	assert.ok(ownStateIndex !== -1 && ownStateIndex < spreadIndex, 'Scalar props remain before the spread and are overridable');
 });
 
+test('transpiled component modules are tagged so they can render as React component-traits', () => {
+	//Every transpiled component (not functional traits) is tagged for the runtime so it can be
+	// rendered directly as React when referenced as a component-trait in dynamically-injected widgets.
+	const tokenizedScopeTrait = readFileSync(join(outputSrc, 'dashboard', 'traits', 'tokens', 'tokenizedScopeTrait.jsx'), 'utf8');
+	assert.match(tokenizedScopeTrait, /Component\.isTranspiledComponent = true;/);
+
+	//Functional traits export a FunctionalTrait function and must NOT be tagged.
+	const functionalTrait = readFileSync(join(outputSrc, 'dashboard', 'traits', 'static', 'staticFunctionalTrait.jsx'), 'utf8');
+	assert.doesNotMatch(functionalTrait, /\.isTranspiledComponent = true;/);
+});
+
+test('handler-built extraWgts component-trait references become direct component imports', () => {
+	const sourceApp = createHandlerExtraWgtsSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-handler-extra-wgts');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const handler = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'scriptActions', 'buildExtraWgtsRow.js'),
+		'utf8'
+	);
+
+	//The component-trait path string is replaced by a direct import of the transpiled component...
+	assert.match(handler, /import TraitsExtraWgtsRowRowComponent from ["']\.\.\/traits\/extraWgtsRow\/rowComponent["'];/);
+	assert.match(handler, /trait:\s*TraitsExtraWgtsRowRowComponent\b/);
+
+	//...and is no longer a trait-path string (which would route to runtime JSON resolution).
+	assert.doesNotMatch(handler, /trait:\s*["']\.\.\/traits\/extraWgtsRow\/rowComponent["']/);
+
+	//A component-trait with no own type (component only via its main trait) is also converted.
+	assert.match(handler, /import TraitsExtraWgtsRowWrapperComponent from ["']\.\.\/traits\/extraWgtsRow\/wrapperComponent["'];/);
+	assert.match(handler, /trait:\s*TraitsExtraWgtsRowWrapperComponent\b/);
+
+	//The injected component module is tagged so the runtime renders it as React.
+	const rowComponent = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'extraWgtsRow', 'rowComponent.jsx'),
+		'utf8'
+	);
+	assert.match(rowComponent, /Component\.isTranspiledComponent = true;/);
+});
+
+test('action-built extraWgts MDA has its component-trait references converted to React', () => {
+	const sourceApp = createActionExtraWgtsSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-action-extra-wgts');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//The component-trait is imported once and used directly in both the inline setState extraWgts
+	// value and the mapArray mapTo template — not left as a trait-path string for runtime JSON.
+	assert.match(dashboard, /import TraitsExtraWgtsRowRowComponent from ["'][^"']*traits\/extraWgtsRow\/rowComponent["'];/);
+	assert.match(dashboard, /type:\s*TraitsExtraWgtsRowRowComponent\b/);
+	assert.doesNotMatch(dashboard, /trait:\s*["']traits\/extraWgtsRow\/rowComponent["']/);
+});
+
+test('component-trait references nested under arbitrary keys (tabContents) are converted', () => {
+	const sourceApp = createNestedTabContentsTraitRefSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-nested-tab-contents-trait-ref');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//The deeply-nested tabContents trait reference is rewritten to a direct component import.
+	assert.match(dashboard, /import MyEnsemblePageIndex from ["'][^"']*@myEnsemble\/page\/index["'];/);
+	assert.match(dashboard, /trait:\s*MyEnsemblePageIndex\b/);
+	assert.doesNotMatch(dashboard, /trait:\s*["']@myEnsemble\/page\/index["']/);
+});
+
+test('catch-all trait conversion does not duplicate an already-imported component', () => {
+	const sourceApp = createDuplicateImportSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-duplicate-import');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//The component is imported exactly once, despite being used statically and referenced in MDA.
+	const importCount = (dashboard.match(/import MyEnsembleSharedIndex from /g) || []).length;
+	assert.equal(importCount, 1, `Expected exactly one import, found ${importCount}`);
+	assert.match(dashboard, /trait:\s*MyEnsembleSharedIndex\b/);
+});
+
+test('rowMda node with its own type and a type-bearing main trait emits a single type key', () => {
+	const sourceApp = createRowMdaOwnTypePlusMainTraitSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-rowmda-type-main-trait');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//The main trait's type wins; the node's own type is dropped (no duplicate `type` key).
+	assert.match(dashboard, /type:\s*TraitsRowTypedRowTrait/);
+	assert.doesNotMatch(dashboard, /type:\s*\w+,\s*type:\s*\w+/);
+});
+
+test('morph eval value containing a JS template literal is escaped (no syntax error)', () => {
+	const sourceApp = createMorphEvalBacktickSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-morph-eval-backtick');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const contents = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'morph', 'subLabelTrait.jsx'),
+		'utf8'
+	);
+
+	//The literal backticks and ${ inside the eval are escaped, so they stay literal in the generated
+	// backtick template instead of prematurely closing it / interpolating (which was a syntax error).
+	assert.match(contents, /\\`\(\\\$\{res\}\)\\`/);
+	assert.doesNotMatch(contents, /[^\\]`\(\$\{res\}\)[^\\]?`/);
+});
+
+test('hand-written local component trait references are converted to direct component imports', () => {
+	const sourceApp = createLocalComponentTraitRefSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-local-component-trait-ref');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const localComponent = readFileSync(
+		join(targetApp, 'src', 'components', 'myWidget', 'buildWgts.js'),
+		'utf8'
+	);
+
+	//A local component that is copied verbatim still gets its component-trait reference rewritten
+	// into a direct import — no JSON resolution at runtime.
+	assert.match(localComponent, /import MyEnsembleRowIndex from ["']\.\.\/\.\.\/dashboard\/@myEnsemble\/row\/index["'];/);
+	assert.match(localComponent, /trait:\s*MyEnsembleRowIndex\b/);
+	assert.doesNotMatch(localComponent, /trait:\s*["']@myEnsemble\/row\/index["']/);
+});
+
 test('generated typed trait replaces root scope token with trait prop accessor', () => {
 	const dashboard = readFileSync(join(outputSrc, 'dashboard', 'sampleDashboard.jsx'), 'utf8');
 	const tokenizedScopeTrait = readFileSync(join(outputSrc, 'dashboard', 'traits', 'tokens', 'tokenizedScopeTrait.jsx'), 'utf8');
@@ -1267,6 +1804,13 @@ test('generated functional trait JSX props ignore wgts tokens inside popoverMda'
 	assert.match(dashboard, /TraitsPopoverPopoverFunctionalTrait\(\{[\s\S]*contentItems:\s*\([\s\S]*<>[\s\S]*<Label[^>]*prps=\{\{ cpt:\s*"Visible content item" \}\}/);
 	assert.match(dashboard, /popoverItems:\s*\[[\s\S]*\{ type:\s*"label", prps:\s*\{ cpt:\s*"Popover-only item" \} \},[\s\S]*\]/);
 	assert.doesNotMatch(dashboard, /popoverItems:\s*<>/);
+
+	//A wgts token nested inside a metadata-MDA container (here `contextMenu.mda.wgts`) is data the
+	// runtime renders from metadata (and JSON-serializes), so it must stay a plain MDA array — never a
+	// JSX fragment. Emitting JSX there injects React elements whose `_owner` fibers are circular,
+	// crashing the wrapper's `JSON.stringify(mda)` with "cyclic object value".
+	assert.match(dashboard, /menuItems:\s*\[[\s\S]*\{ type:\s*"label", prps:\s*\{ cpt:\s*"Context-menu item" \} \},?[\s\S]*\]/);
+	assert.doesNotMatch(dashboard, /menuItems:\s*<>/);
 });
 
 test('generated tokenless root trait without acceptPrps is treated as functional trait', () => {
@@ -1949,4 +2493,50 @@ test('generated functional trait replaces dollar trait prop tokens after inline 
 	assert.match(contents, /if \(\$\{JSON\.stringify\(getDeepProperty\(traitPrps, ["']flag["']\)\)\}\)/);
 	assert.match(contents, /res\.width = \$\{getThemeValue\(["']colors\.primary["']\)\};/);
 	assert.doesNotMatch(contents, /\$flag\$/);
+});
+
+test('trait-list prop string elements are converted to direct trait-module imports', () => {
+	//A trait-list prop (traitsTreeNode) holds bare trait-path strings that a library component applies
+	// to each node it builds. Both functional traits (no own type) and component traits should be
+	// converted to direct imports so the runtime applies/renders them as React rather than resolving
+	// the paths from JSON metadata. Strings that do not resolve to a known trait file are left alone.
+	const mapFiles = new Map([
+		['dashboard/@menu/tree/functional/setBg.json', { contents: { prps: { flows: [] } } }],
+		['dashboard/@menu/tree/functional/setDivider.json', { contents: { prps: { flows: [] } } }],
+		['dashboard/@menu/tree/nodeComponent.json', { contents: { type: 'containerSimple' } }]
+	]);
+
+	const currentPath = 'dashboard/@menu/tree/index';
+
+	const input = [
+		'const prps = {',
+		'\ttraitsTreeNode: [',
+		'\t\t"@menu/tree/functional/setBg",',
+		'\t\t"@menu/tree/functional/setDivider",',
+		'\t\t"@menu/tree/nodeComponent",',
+		'\t\t"@menu/tree/functional/unknownTrait"',
+		'\t],',
+		'\ttraits: [{ trait: "@menu/tree/functional/setBg" }]',
+		'};'
+	].join('\n');
+
+	const output = transformTraitReferences(input, currentPath, mapFiles);
+
+	//Each known trait path inside the trait-list prop becomes a direct import...
+	assert.match(output, /import MenuTreeFunctionalSetBg from ['"]\.\/functional\/setBg['"];/);
+	assert.match(output, /import MenuTreeFunctionalSetDivider from ['"]\.\/functional\/setDivider['"];/);
+	assert.match(output, /import MenuTreeNodeComponent from ['"]\.\/nodeComponent['"];/);
+
+	//...and is referenced directly (bare identifier) inside the array, no longer a path string.
+	assert.match(output, /traitsTreeNode:\s*\[[\s\S]*MenuTreeFunctionalSetBg[\s\S]*\]/);
+	assert.doesNotMatch(output, /["']@menu\/tree\/functional\/setBg["'],/);
+	assert.doesNotMatch(output, /["']@menu\/tree\/functional\/setDivider["']/);
+	assert.doesNotMatch(output, /["']@menu\/tree\/nodeComponent["']/);
+
+	//A path with no matching trait file is left untouched.
+	assert.match(output, /["']@menu\/tree\/functional\/unknownTrait["']/);
+
+	//The component's own `traits: [{ trait }]` array is handled by the component-trait pass: this
+	// reference is a functional trait, so it is intentionally left as a string there.
+	assert.match(output, /traits:\s*\[\{\s*trait:\s*["']@menu\/tree\/functional\/setBg["']\s*\}\]/);
 });

@@ -171,6 +171,12 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 
 	let res;
 
+	//Functional trait objects emit a plain object literal (not JSX), so system props
+	// like `container` must be rendered as `key: value` entries rather than `key={value}`
+	// attributes. Without this they were silently dropped (e.g. a trait's
+	// `container: "appDashboard"` portal target never reached the runtime).
+	const objectLiteralSysPrps = hasFunctionalTraits || isFunctionalTraitObject;
+
 	let sysPrps = [];
 
 	['id', 'scope', 'relId', 'container'].forEach(key => {
@@ -182,7 +188,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 		let br = '}';
 		let s = '=';
 
-		if (hasFunctionalTraits) {
+		if (objectLiteralSysPrps) {
 			bl = '';
 			br = '';
 			s = ':';
@@ -191,33 +197,35 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 		if (key === 'scope') {
 			let fixedValue = buildSysPropValue(value);
 
-			if (isRootLevel) {
+			//A functional trait has no `scope` parameter to combine with, so skip the
+			// root-component scope merge for functional trait objects.
+			if (isRootLevel && !isFunctionalTraitObject) {
 				if (Array.isArray(value))
 					fixedValue = `[${value.map(buildSysPropValue).join(', ')}, scope]`;
 				else
 					fixedValue = `[${fixedValue}, scope]`;
 			}
 
-			if (!hasFunctionalTraits && (isRootLevel || needsJsxExpression(value) || needsJsxExpression(fixedValue)))
+			if (!objectLiteralSysPrps && (isRootLevel || needsJsxExpression(value) || needsJsxExpression(fixedValue)))
 				sysPrps.push(`${key}${s}{${fixedValue}}`);
 			else
 				sysPrps.push(`${key}${s}${fixedValue}`);
 		} else {
 			let fixedValue = buildSysPropValue(value);
-			if (!hasFunctionalTraits && needsJsxExpression(fixedValue))
+			if (!objectLiteralSysPrps && needsJsxExpression(fixedValue))
 				sysPrps.push(`${key}${s}{${fixedValue}}`);
 			else
 				sysPrps.push(`${key}${s}${fixedValue}`);
 		}
 	});
-	if (isRootLevel && !obj.scope) {
+	if (isRootLevel && !obj.scope && !isFunctionalTraitObject) {
 		if (!hasFunctionalTraits)
 			sysPrps.push('scope={scope}');
 		else
 			sysPrps.push('scope');
 	}
 
-	let sysPrpsString = sysPrps.join(hasFunctionalTraits ? ',' : ' ');
+	let sysPrpsString = sysPrps.join(objectLiteralSysPrps ? ',' : ' ');
 
 	let restString = '';
 	if (isRootLevel && !isFunctionalTraitObject)
@@ -235,10 +243,13 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 	}
 
 	if (isFunctionalTraitObject) {
-		if (hasFunctionalTraits)
-			res = `...applyTraits({ prps: { ${prpsString} }, traits: [${traitsInfo.otherTraits.map(buildTraitApplication).join(',')}] })`;
-		else
-			res = `prps: { ${prpsString} }`;
+		if (hasFunctionalTraits) {
+			const sysPrpsArg = sysPrpsString ? `sysPrps: { ${sysPrpsString} }, ` : '';
+			res = `...applyTraits({ ${sysPrpsArg}prps: { ${prpsString} }, traits: [${traitsInfo.otherTraits.map(buildTraitApplication).join(',')}] })`;
+		} else {
+			const sysPrpsPrefix = sysPrpsString ? `${sysPrpsString}, ` : '';
+			res = `${sysPrpsPrefix}prps: { ${prpsString} }`;
+		}
 	}
 	else {
 		const dynamicTypeProp = dynamicTypeAccessor ? `type={${dynamicTypeAccessor}}` : '';

@@ -16,10 +16,17 @@ const buildTraitAccessor = trait => {
 	return buildTraitPrpsAccessor(token);
 };
 
-// Recursively checks if a wgts token like "$key$" exists anywhere in the object,
-// but explicitly ignores anything inside a `popoverMda` branch.
-// As soon as `popoverMda` is encountered, that subtree is skipped entirely.
-const hasWgtsTokenOutsidePopover = (node, key) => {
+// A nested metadata-MDA container: its `wgts` are data that the runtime renders from metadata
+// (and JSON-serializes), NOT React children of this trait. Examples: popoverMda, tooltipMda,
+// dropPlaceholderMda, and `{ mda: { ... } }` wrappers such as a contextMenu's `mda`. Rendering such
+// `wgts` as JSX would inject React elements (whose `_owner` fibers are circular) into MDA that the
+// runtime later stringifies, crashing the wrapper with "cyclic object value".
+const isMetadataMdaKey = key => key === 'mda' || /Mda$/.test(key);
+
+// Recursively checks whether a wgts token like "$key$" is used as the trait's own rendered `wgts`
+// (its React children, which become JSX). Descent skips nested metadata-MDA containers (see above):
+// a token reached only through one of those is data, not children, and must stay as a plain MDA value.
+const hasWgtsTokenAsRenderedChildren = (node, key) => {
 	if (!node || typeof node !== 'object')
 		return false;
 
@@ -27,10 +34,10 @@ const hasWgtsTokenOutsidePopover = (node, key) => {
 		return true;
 
 	return Object.entries(node).some(([k, v]) => {
-		if (k === 'popoverMda')
+		if (isMetadataMdaKey(k))
 			return false;
 
-		return hasWgtsTokenOutsidePopover(v, key);
+		return hasWgtsTokenAsRenderedChildren(v, key);
 	});
 };
 
@@ -118,7 +125,7 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 		//Can't have jsx inside rowMda: { ... }
 		if (!isInRowMda) {
 			Object.entries(traitPrps).forEach(([k, v]) => {
-				if (v?.map && hasWgtsTokenOutsidePopover(contents, k))
+				if (v?.map && hasWgtsTokenAsRenderedChildren(contents, k))
 					traitPrps[k] = `<>${v.map(m => generateComponent(m, false, v.length === 1, { forceJsx: true })).join('')}</>`;
 			});
 		}

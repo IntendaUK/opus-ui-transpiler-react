@@ -9,6 +9,7 @@ import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponent
 
 //Helpers
 import buildTraitsInfo from './buildTraitsInfo.mjs';
+import identifyMainTrait from './identifyMainTrait.mjs';
 import findComponentLibraryName from './findComponentLibraryName.mjs';
 import findLocalComponentPath from './findLocalComponentPath.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
@@ -63,6 +64,24 @@ const ARRAY_MERGE_PRPS = [
 	'lookupFlows',
 	'traitMappings'
 ];
+
+//Keys whose value is Opus MDA that the runtime renders. Treating these like rowMda makes the
+// transpiler convert their `type`/`trait` references into React components (direct imports or
+// resolveDynamicTrait) rather than leaving raw metadata that would be resolved from JSON at runtime.
+// Covers repeater/treeview templates (rowMda/mdaLabel/mdaExpander), and widgets bound for extraWgts
+// whether built inline (setState value) or via mapArray (mapTo).
+const RENDER_MDA_KEYS = new Set(['rowMda', 'mdaLabel', 'mdaExpander', 'mapTo', 'extraWgts']);
+
+const isRenderMdaKey = (key, parent) => {
+	if (RENDER_MDA_KEYS.has(key))
+		return true;
+
+	//A setState/setMultiState action writing extraWgts: its `value` is render MDA.
+	if (key === 'value' && parent && parent.key === 'extraWgts')
+		return true;
+
+	return false;
+};
 
 const scriptActionPassthroughKeys = new Set([
 	'actionCondition',
@@ -170,6 +189,13 @@ const buildProps = ({
 		const vType = typeof(v);
 
 		if (isInRowMda && k === 'type') {
+			//A type-bearing main trait overrides the node's own type (Opus trait-combine semantics),
+			// and the traits handler below will emit that trait's `type`. Emitting the node's own type
+			// as well would produce a duplicate `type` key, so defer to the main trait. (identifyMainTrait
+			// is used rather than buildTraitsInfo here because the latter has registration side effects.)
+			if (Array.isArray(prps.traits) && identifyMainTrait(prps.traits))
+				return;
+
 			//A local app component (src/components/<type>) is just as valid a row component type
 			// as a library component, so accept either.
 			const componentLibrary = findLocalComponentPath(v) || findComponentLibraryName(v);
@@ -320,14 +346,14 @@ const buildProps = ({
 				prps: v,
 				wrap: false,
 				isArray: true,
-				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander',
+				isInRowMda: isInRowMda || isRenderMdaKey(k, combined),
 				debugPath: [...debugPath, k]
 			})}]`;
 		} else if (vType === 'object' && v !== null) {
 			value = `{${buildProps({
 				prps: v,
 				wrap: false,
-				isInRowMda: isInRowMda || k === 'rowMda' || k === 'mdaLabel' || k === 'mdaExpander',
+				isInRowMda: isInRowMda || isRenderMdaKey(k, combined),
 				debugPath: [...debugPath, k]
 			})}}`;
 		}

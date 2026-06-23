@@ -50,6 +50,17 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 				traitPrps.${k} = getSyncScriptResult({${script}});
 			`;
 
+			//The swap below turns every double-quoted string into a backtick template (so %token%
+			// values can interpolate as ${traitPrps.x}). Any literal backtick or ${ already inside a
+			// double-quoted VALUE (e.g. an eval that uses a JS template literal like `(${res})`) must
+			// be escaped first, or it would prematurely close the template / interpolate at the wrong
+			// level. Values that needed token interpolation are already emitted as backtick literals
+			// (with their own escaping) by injectTraitPrpsInString, so they are not double-quoted here
+			// and are left untouched.
+			morpher = morpher.replace(/"(?:[^"\\]|\\.)*"/g, segment =>
+				segment.replace(/(?<!\\)`/g, '\\`').replace(/(?<!\\)\$\{/g, '\\${')
+			);
+
 			morpher = morpher.replaceAll('"', '`');
 			morpher = morpher.replace(/([,{]\s*)`([^`]+)`\s*:/g, '$1[`$2`]:');
 
@@ -71,13 +82,11 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 		: '';
 
 	const res = `
-		const setTraitPrps = (traitPrps, auth, setReady) => {
+		const setTraitPrps = (traitPrps, auth) => {
 		${applyDefaults}
 		${morphers}
 		//Blueprints don't have 'auth' capabilities so they must always override
 		${idCondition}
-
-		setReady(true);
 	};`;
 
 	return res;

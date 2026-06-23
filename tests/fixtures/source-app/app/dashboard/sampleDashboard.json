@@ -202,6 +202,14 @@
 									"cpt": "Popover-only item"
 								}
 							}
+						],
+						"menuItems": [
+							{
+								"type": "label",
+								"prps": {
+									"cpt": "Context-menu item"
+								}
+							}
 						]
 					}
 				}

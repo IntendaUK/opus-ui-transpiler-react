@@ -1,13 +1,20 @@
 {
 	"acceptPrps": {
 		"contentItems": "array",
-		"popoverItems": "array"
+		"popoverItems": "array",
+		"menuItems": "array"
 	},
 	"prps": {
 		"wgts": "$contentItems$",
 		"popoverMda": {
 			"type": "container",
 			"wgts": "$popoverItems$"
+		},
+		"contextMenu": {
+			"mda": {
+				"type": "containerSimple",
+				"wgts": "$menuItems$"
+			}
 		}
 	}
 }

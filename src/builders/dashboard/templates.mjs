@@ -4,7 +4,7 @@ const mainPrefix = `
 `;
 
 const mainPrefixHasMainTrait = `
-	import React, { useEffect, useState } from 'react';
+	import React, { useMemo } from 'react';
 	import { ExternalComponent, getSyncScriptResult, isConditionMet, getThemeValue, getDeepProperty, generateGuid } from '@intenda/opus-ui';
 `;
 
@@ -15,12 +15,10 @@ const functionPrefix = `
 
 const functionPrefixHasMainTrait = `
 	const Component = ({ scope, prps, traitPrps = {}, ...rest }) => {
-		const [ready, setReady] = useState(false);
-
-		useEffect(setTraitPrps.bind(null, traitPrps, rest.auth, setReady), [traitPrps]);
-
-		if (!ready)
-			return null;
+		//setTraitPrps only mutates traitPrps via synchronous, script-local operations, so it is
+		// safe to run during render. It must re-run whenever a new traitPrps object arrives
+		// (e.g. a repeater rebuilding its rows), or the new clone would render uninitialised.
+		useMemo(() => setTraitPrps(traitPrps, rest.auth), [traitPrps]);
 
 		return (
 `;
@@ -45,12 +43,22 @@ const functionSuffix = `
 		);
 	};
 
+	//Marks this module as a transpiled Opus component so the runtime can render it directly as React
+	// when it is referenced as a component-trait inside dynamically-injected widgets (e.g. extraWgts),
+	// instead of resolving it from JSON metadata.
+	Component.isTranspiledComponent = true;
+
 	export default Component;
 `;
 
 const functionSuffixHasMainTrait = `
 		);
 	};
+
+	//Marks this module as a transpiled Opus component so the runtime can render it directly as React
+	// when it is referenced as a component-trait inside dynamically-injected widgets (e.g. extraWgts),
+	// instead of resolving it from JSON metadata.
+	Component.isTranspiledComponent = true;
 
 	export default Component;
 `;

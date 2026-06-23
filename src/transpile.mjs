@@ -13,6 +13,7 @@ import buildDashboard from './builders/dashboard.mjs';
 import buildDynamicTraits from './builders/dynamicTraits.mjs';
 import buildScriptAction from './builders/scriptAction.mjs';
 import buildSrcFoldersAndFiles from './builders/srcFoldersAndFiles.mjs';
+import transformOutputTraitRefs from './builders/transformOutputTraitRefs.mjs';
 import analyzeDynamicRootTypes from './builders/dashboard/analyzeDynamicRootTypes.mjs';
 
 let mdaPackage;
@@ -99,7 +100,7 @@ const createFile = entry => {
 	const { path, type } = entry;
 
 	if (type === 'scriptAction')
-		buildScriptAction(entry);
+		buildScriptAction(entry, mapFiles);
 	else if (path.indexOf('theme/') === 0) {
 		buildTheme(entry);
 
@@ -496,10 +497,13 @@ buildFileSet(mdaPackage);
 dynamicRootTypes = analyzeDynamicRootTypes(mapFiles);
 
 console.log('Loading Custom Code');
-buildSrcFoldersAndFiles();
+await buildSrcFoldersAndFiles();
 
 console.log('Transpiling');
 createFiles();
+
+console.log('Resolving Component-Trait References');
+transformOutputTraitRefs(mapFiles);
 
 console.log('Copying Static Files');
 copyStaticFiles();
