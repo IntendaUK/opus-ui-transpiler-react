@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-const defaultSourceApplicationFolder = resolve(workspaceRoot, 'legoz');
+const defaultSourceApplicationFolder = resolve(workspaceRoot, 'packages', 'original-app');
 const defaultTargetApplicationFolder = resolve(workspaceRoot, 'packages', 'legoz');
 const defaultReplaceMainJsx = false;
 const defaultReplacePublicFolder = true;

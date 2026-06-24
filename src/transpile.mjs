@@ -132,12 +132,25 @@ const createFiles = () => {
 	});
 };
 
+//`concurrency` is only supported by newer ESLint releases. Whichever ESLint ends up resolved
+// (the transpiler's own, or a hoisted/older one from an ancestor node_modules) we want to use the
+// speed-up when available and still run when it isn't, rather than crash on an unknown option.
+const createEslint = () => {
+	try {
+		return new ESLint({
+			fix: true,
+			concurrency: 30
+		});
+	} catch (err) {
+		if (err?.code === 'ESLINT_INVALID_OPTIONS')
+			return new ESLint({ fix: true });
+
+		throw err;
+	}
+};
+
 const runEslintOnOutput = async () => {
-	const eslint = new ESLint({
-		fix: true,
-		concurrency: 30
-		//concurrency: 'auto'
-	});
+	const eslint = createEslint();
 
 	const results = await eslint.lintFiles(['output/src/**/*.{js,jsx}']);
 

@@ -11,7 +11,7 @@ import { initMapFiles } from './dashboard/mapFiles.mjs';
 // resolves to one through a main trait. Functional traits (no type, no main trait) are left as
 // strings so their resolution is unchanged. Guarded: any resolution hiccup falls back to "not a
 // component", i.e. leave the reference untouched rather than mis-convert it.
-const isComponentTrait = contents => {
+export const isComponentTrait = contents => {
 	if (!contents || typeof(contents) !== 'object' || contents.traitArray)
 		return false;
 
@@ -52,7 +52,7 @@ const getRelativeImportPath = (currentPath, targetPath) => {
 //Resolve a trait-path reference (as written inside built MDA) to a transpiler file-map key.
 // Absolute ensemble paths look like "@scope/path"; relative paths ("./x", "../x") resolve against
 // the referencing file's own folder (currentPath, relative to output/src). Anything else is ignored.
-const resolveTraitKey = (traitPath, currentPath) => {
+export const resolveTraitKey = (traitPath, currentPath) => {
 	if (traitPath.startsWith('@'))
 		return `dashboard/${traitPath}.json`;
 
@@ -169,9 +169,27 @@ export const transformTraitReferences = (contents, currentPath, mapFiles) => {
 	return `${importLines}\n\n${transformed}`;
 };
 
+//A viewport's `loadFromJsx` prop makes the runtime render the transpiled .jsx dashboard instead of
+// resolving JSON metadata at runtime. generateComponent stamps it onto viewport nodes in the static
+// component tree, but viewports built imperatively inside handler code (e.g. the tab manager's
+// tOpenTab, which constructs `{ type: 'viewport', prps: { value } }` to render an opened tab) never
+// pass through that path — so without this they silently fall back to JSON loading. Inject the flag
+// into the prps of any `type: 'viewport'` object literal. By Opus metadata convention these literals
+// declare `type` immediately followed by a sibling `prps` object, so the flag is added as its first
+// key. (Whitespace/newlines between the two are tolerated.)
+const VIEWPORT_PRPS_REGEX = /(type\s*:\s*(["'])viewport\2\s*,\s*prps\s*:\s*\{)/g;
+
+export const injectViewportLoadFromJsx = contents => {
+	if (typeof(contents) !== 'string')
+		return contents;
+
+	return contents.replace(VIEWPORT_PRPS_REGEX, '$1 loadFromJsx: true,');
+};
+
 //Helpers
 const scriptAction = ({ path, contents }, mapFiles) => {
-	const transpiled = transformTraitReferences(contents, `dashboard/${path}`, mapFiles);
+	let transpiled = transformTraitReferences(contents, `dashboard/${path}`, mapFiles);
+	transpiled = injectViewportLoadFromJsx(transpiled);
 
 	const outputPath = join('output', 'src', 'dashboard', path) + '.js';
 

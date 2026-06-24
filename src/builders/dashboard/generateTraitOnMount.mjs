@@ -1,4 +1,5 @@
 import buildProps from './buildProps.mjs';
+import extractEvalTraitHandler from './extractEvalTraitHandler.mjs';
 
 const buildDefaultValueExpression = value => {
 	if (typeof(value) !== 'string' || !value.includes('{theme.'))
@@ -41,6 +42,17 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 	const morphers = Object.entries(acceptPrps)
 		.filter(([k, v]) => v.morph === true)
 		.map(([k, v]) => {
+			//A morph eval that references a component trait can't survive as an eval string (the
+			// rewritten component import isn't in eval scope). Lift it into a real handler module and
+			// call it directly instead. Returns null for anything not matching that strict shape, in
+			// which case we fall through to the existing getSyncScriptResult emission.
+			if (path) {
+				const extracted = extractEvalTraitHandler(k, v, path);
+
+				if (extracted)
+					return `traitPrps.${k} = ${extracted.callExpression};`;
+			}
+
 			const script = buildProps({
 				wrap: false,
 				prps: v

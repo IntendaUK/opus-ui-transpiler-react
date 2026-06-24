@@ -750,6 +750,63 @@ const createMorphEvalBacktickSourceApp = () => {
 	return sourceApp;
 };
 
+const createMorphEvalComponentTraitSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-morph-eval-component-trait');
+	//Mirror the real datePicker shape: a morph:true acceptPrp whose eval pushes a COMPONENT trait.
+	const hostTraitPath = join(sourceApp, 'app', 'dashboard', '@l2_date_picker', 'visual', 'datePickerComponent', 'index.json');
+	const buttonTraitPath = join(sourceApp, 'app', 'dashboard', '@l2_dashboards', 'overrides', 'l2_buttons', 'dynamic', 'index.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A component trait the eval references by @-path.
+	mkdirSync(dirname(buttonTraitPath), { recursive: true });
+	writeFileSync(buttonTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { cpt: 'string' },
+		prps: { cpt: '%cpt%' }
+	}, null, '\t'), 'utf8');
+
+	//A morph:true acceptPrp: single setVariable eval referencing the component trait, %token% and a
+	// {theme.} reference, no Opus runtime tokens.
+	mkdirSync(dirname(hostTraitPath), { recursive: true });
+	writeFileSync(hostTraitPath, JSON.stringify({
+		type: 'label',
+		acceptPrps: {
+			hasClear: { type: 'boolean', dft: false },
+			mdaExtraContainer: {
+				morph: true,
+				morphVariable: 'res',
+				morphActions: [{
+					type: 'setVariable',
+					name: 'res',
+					value: [
+						'{{eval.',
+						'  const wgts = [];',
+						'  if (%hasClear%) {',
+						"    wgts.push({ traits: [{ trait: '@l2_dashboards/overrides/l2_buttons/dynamic/index', traitPrps: { cpt: 'Clear', cptColor: '{theme.colors.iconPrimary}' } }], prps: {} });",
+						'  }',
+						"  const res = wgts.length ? { type: 'containerSimple', prps: {}, wgts } : null;",
+						'  res;',
+						'}}'
+					]
+				}]
+			}
+		},
+		prps: { cpt: 'Date picker' }
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+	sampleDashboard.wgts.push({
+		id: 'datePickerUsage',
+		traits: [{ trait: '@l2_date_picker/visual/datePickerComponent/index', traitPrps: { hasClear: true } }]
+	});
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
 const createLocalComponentTraitRefSourceApp = () => {
 	const sourceApp = join(tmpRoot, 'source-app-local-component-trait-ref');
 	const rowTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'row', 'index.json');
@@ -1722,6 +1779,53 @@ test('morph eval value containing a JS template literal is escaped (no syntax er
 	// backtick template instead of prematurely closing it / interpolating (which was a syntax error).
 	assert.match(contents, /\\`\(\\\$\{res\}\)\\`/);
 	assert.doesNotMatch(contents, /[^\\]`\(\$\{res\}\)[^\\]?`/);
+});
+
+test('morph eval referencing a component trait is lifted into a real handler module (no eval string)', () => {
+	const sourceApp = createMorphEvalComponentTraitSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-morph-eval-component-trait');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const componentDir = join(targetApp, 'src', 'dashboard', '@l2_date_picker', 'visual', 'datePickerComponent');
+	const component = readFileSync(join(componentDir, 'index.jsx'), 'utf8');
+	const handler = readFileSync(join(componentDir, 'functional', 'mdaExtraContainerEvalHandler.js'), 'utf8');
+
+	//The morph emission calls the handler directly — no eval string, no getSyncScriptResult for this prop.
+	// (prettier may wrap the call across lines, so tolerate whitespace.)
+	assert.match(component, /traitPrps\.mdaExtraContainer =\s*\w*MdaExtraContainerEvalHandler\(\s*traitPrps,?\s*\);/);
+	assert.doesNotMatch(component, /mdaExtraContainer = getSyncScriptResult/);
+
+	//The component imports the handler by relative path.
+	assert.match(component, /import \w*MdaExtraContainerEvalHandler from ['"]\.\/functional\/mdaExtraContainerEvalHandler['"];/);
+
+	//The handler is real module code: helper imports, tokens converted, component trait left as a STRING
+	// (the final output pass rewrites it into an import — so it must be a direct import there, not eval).
+	assert.match(handler, /import \{ getThemeValue, getDeepProperty \} from ['"]@intenda\/opus-ui['"];/);
+	assert.match(handler, /getDeepProperty\(traitPrps, ['"]hasClear['"]\)/);
+	assert.match(handler, /getThemeValue\(['"]colors\.iconPrimary['"]\)/);
+	assert.match(handler, /return res;/);
+	assert.doesNotMatch(handler, /\{\{eval/);
+	assert.doesNotMatch(handler, /%hasClear%/);
+
+	//The trait reference in the handler became a direct import (final output pass), not a bare identifier
+	// trapped in an eval string and not the raw path string.
+	assert.match(handler, /import \w+ from ['"][^'"]*l2_buttons\/dynamic\/index['"];/);
+	assert.match(handler, /trait:\s*\w+\b/);
+	assert.doesNotMatch(handler, /trait:\s*['"]@l2_dashboards/);
 });
 
 test('hand-written local component trait references are converted to direct component imports', () => {
