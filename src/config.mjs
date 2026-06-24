@@ -7,7 +7,7 @@ const defaultSourceApplicationFolder = resolve(workspaceRoot, 'packages', 'origi
 const defaultTargetApplicationFolder = resolve(workspaceRoot, 'packages', 'legoz');
 const defaultReplaceMainJsx = false;
 const defaultReplacePublicFolder = true;
-const defaultPreservedSrcFolders = [];
+const defaultPreservedSrcFolders = ['themes'];
 
 const parseBool = (value, fallback) => value === undefined
 	? fallback

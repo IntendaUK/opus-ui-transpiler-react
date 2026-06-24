@@ -78,7 +78,12 @@ const conditionalRootTypeTemplate = `
 		if (!match)
 			return null;
 
-		const Type = match.type;
+		//A static branch carries its component directly on \`type\`; a data-token branch carries a
+		// path-keyed component map plus the (per-row resolved) key to look the component up with.
+		const Type = match.type ?? (match.typeMap ? match.typeMap[match.typeKey] : undefined);
+
+		if (!Type)
+			return null;
 
 		return <Type {...rest} traitPrps={match.traitPrps} />;
 	};

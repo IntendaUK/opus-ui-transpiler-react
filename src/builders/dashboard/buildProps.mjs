@@ -6,6 +6,11 @@ import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
 import { setNeedsDynamicTraitResolver, setNeedsConditionalRootType } from './generateImports.mjs';
 import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
+import {
+	getTraitPathFieldEntries,
+	registerTraitPathComponentMap
+} from './dynamicRootTypes.mjs';
+import { extractTraitTokenFieldName } from './analyzeTraitPathFields.mjs';
 
 //Helpers
 import buildTraitsInfo from './buildTraitsInfo.mjs';
@@ -239,10 +244,41 @@ const buildProps = ({
 			const conditionalRootTypeTraits = [traitsInfo.mainTrait, ...traitsInfo.otherTraits]
 				.filter(t => t && t.type && t.contents?.type && t.condition);
 
-			if (conditionalRootTypeTraits.length > 1) {
+			//A condition-guarded trait whose reference is a per-row DATA TOKEN (e.g.
+			// `((rowData.field.customHeaderCellTrait))`). buildTraitsInfo cannot resolve it to a static
+			// component, so it never appears in conditionalRootTypeTraits above. Instead of dropping it
+			// (which leaves the dispatcher with no matching branch -> blank cell), resolve it to a STATIC
+			// component map discovered at transpile time and emit a `typeMap`/`typeKey` entry the runtime
+			// resolves per row. Only the raw traits array carries the original token + condition + prps.
+			const dynamicConditionalRootTypeTraits = (Array.isArray(prps.traits) ? prps.traits : [])
+				.filter(t => t && typeof(t) === 'object' && t.condition && typeof(t.trait) === 'string')
+				.map(t => {
+					const fieldName = extractTraitTokenFieldName(t.trait);
+
+					if (!fieldName)
+						return;
+
+					const fieldEntries = getTraitPathFieldEntries(fieldName);
+
+					//Only take this path when ≥1 concrete value was discovered; otherwise leave the trait
+					// dropped (current behaviour) so we never emit an empty map.
+					if (!fieldEntries.length)
+						return;
+
+					return {
+						fieldName,
+						typeKey: t.trait,
+						condition: t.condition,
+						traitPrps: t.traitPrps,
+						fieldEntries
+					};
+				})
+				.filter(Boolean);
+
+			if (conditionalRootTypeTraits.length + dynamicConditionalRootTypeTraits.length > 1) {
 				setNeedsConditionalRootType(true);
 
-				const entries = conditionalRootTypeTraits.map(({ type, path, condition, traitPrps }) => {
+				const staticEntries = conditionalRootTypeTraits.map(({ type, path, condition, traitPrps }) => {
 					if (!getTraitImports().some(f => f.type === type)) {
 						pushToTraitImports({
 							type,
@@ -264,6 +300,48 @@ const buildProps = ({
 
 					return `{ condition: {${conditionString}}, type: ${type}, traitPrps: {${traitPrpsString}} }`;
 				});
+
+				const dynamicEntries = dynamicConditionalRootTypeTraits.map(
+					({ fieldName, typeKey, condition, traitPrps, fieldEntries }) => {
+						//Ensure each discovered component is imported (the map keys by the literal data
+						// value the runtime token substitutes, valued by the imported component identifier).
+						fieldEntries.forEach(({ path }) => {
+							const importPath = path.replace(/\.json$/, '');
+							const type = pathToIdentifier(importPath);
+
+							if (!getTraitImports().some(f => f.type === type)) {
+								pushToTraitImports({
+									type,
+									path: importPath
+								});
+							}
+						});
+
+						const mapName = registerTraitPathComponentMap(
+							fieldName,
+							fieldEntries.map(({ value, path }) => ({
+								value,
+								type: pathToIdentifier(path.replace(/\.json$/, ''))
+							}))
+						);
+
+						const conditionString = buildProps({
+							prps: condition,
+							wrap: false,
+							isInRowMda
+						});
+
+						const traitPrpsString = buildProps({
+							prps: traitPrps,
+							wrap: false,
+							isInRowMda
+						});
+
+						return `{ condition: {${conditionString}}, typeMap: ${mapName}, typeKey: ${JSON.stringify(typeKey)}, traitPrps: {${traitPrpsString}} }`;
+					}
+				);
+
+				const entries = [...staticEntries, ...dynamicEntries];
 
 				lines.push('type: renderConditionalRootType');
 				lines.push(`conditionalRootTypes: [${entries.join(', ')}]`);
@@ -299,10 +377,25 @@ const buildProps = ({
 
 			if (traitsInfo.otherTraits.length) {
 				const otherTraitsString = traitsInfo.otherTraits
-					.map(({ type, traitPrps }) => {
-						const res = `{ type: ${type}, traitPrps: ${JSON.stringify(traitPrps)} }`;
+					.map(({ type, traitPrps, condition }) => {
+						const entry = `{ type: ${type}, traitPrps: ${JSON.stringify(traitPrps)} }`;
 
-						return res;
+						//A functional trait can be guarded by a `condition` (e.g. virtualizeColumn, applied
+						// only when `$virtualize$` is truthy). The runtime applyNodeTraits/applyTraits apply
+						// every trait in this array UNCONDITIONALLY, so honour the condition here by only
+						// including the trait when it is met — mirroring buildTraitApplication for the JSX
+						// path. Without this a conditional functional trait is always applied (e.g. the grid
+						// cell column is forced to the virtualized 200px width even when not virtualized).
+						if (!condition)
+							return entry;
+
+						const conditionString = buildProps({
+							prps: condition,
+							wrap: false,
+							isInRowMda
+						});
+
+						return `...(isConditionMet({${conditionString}}) ? [${entry}] : [])`;
 					})
 					.join(',');
 

@@ -2,7 +2,7 @@
 import { getUsedComponentTypes } from './usedComponentTypes.mjs';
 import { getScriptImports } from './scriptImports.mjs';
 import { getTraitImports } from './traitImports.mjs';
-import { getDynamicRootTypeComponentMaps } from './dynamicRootTypes.mjs';
+import { getDynamicRootTypeComponentMaps, getTraitPathComponentMaps } from './dynamicRootTypes.mjs';
 import { getMapFilesEntry } from './mapFiles.mjs';
 
 //Helpers
@@ -164,6 +164,16 @@ const generateImports = () => {
 			.join(', ');
 
 		res.push(`const ${name} = { ${entries} };`);
+	});
+
+	//Path-keyed component maps for data-token conditional root types: keyed by the literal trait-path
+	// value stored in the row data (what the runtime token substitutes), valued by the imported component.
+	getTraitPathComponentMaps().forEach(({ name, entries }) => {
+		const mapEntries = entries
+			.map(({ value, type }) => `${JSON.stringify(value)}: ${type}`)
+			.join(', ');
+
+		res.push(`const ${name} = { ${mapEntries} };`);
 	});
 
 	//Wrap each local component by its registered type string so it renders through the Opus UI

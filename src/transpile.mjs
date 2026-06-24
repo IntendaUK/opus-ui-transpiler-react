@@ -15,6 +15,8 @@ import buildScriptAction from './builders/scriptAction.mjs';
 import buildSrcFoldersAndFiles from './builders/srcFoldersAndFiles.mjs';
 import transformOutputTraitRefs from './builders/transformOutputTraitRefs.mjs';
 import analyzeDynamicRootTypes from './builders/dashboard/analyzeDynamicRootTypes.mjs';
+import analyzeTraitPathFields from './builders/dashboard/analyzeTraitPathFields.mjs';
+import { initTraitPathFieldMaps } from './builders/dashboard/dynamicRootTypes.mjs';
 
 let mdaPackage;
 const mapFiles = new Map();
@@ -27,7 +29,9 @@ const setup = () => {
 	if (existsSync(outputPath)) {
 		rmSync(outputPath, {
 			recursive: true,
-			force: true
+			force: true,
+			maxRetries: 5,
+			retryDelay: 100
 		});
 	}
 
@@ -196,7 +200,9 @@ const copyFolderContentsRecursive = (sourceFolder, destinationFolder, {
 
 			rmSync(join(destinationFolder, name), {
 				recursive: true,
-				force: true
+				force: true,
+				maxRetries: 5,
+				retryDelay: 100
 			});
 		});
 	}
@@ -252,13 +258,17 @@ const deleteFolderCrossPlatform = (folderPath, preservedPaths = []) => {
 
 			rmSync(join(fullPath, name), {
 				recursive: true,
-				force: true
+				force: true,
+				maxRetries: 5,
+				retryDelay: 100
 			});
 		});
 	} else {
 		rmSync(fullPath, {
 			recursive: true,
-			force: true
+			force: true,
+			maxRetries: 5,
+			retryDelay: 100
 		});
 	}
 
@@ -283,7 +293,9 @@ const moveFolderContentsRecursive = (sourceFolder, destinationFolder) => {
 
 			rmSync(sourcePath, {
 				recursive: true,
-				force: true
+				force: true,
+				maxRetries: 5,
+				retryDelay: 100
 			});
 
 			return;
@@ -431,7 +443,9 @@ const copyStaticFiles = () => {
 		if (existsSync(appBlueprintDest)) {
 			rmSync(appBlueprintDest, {
 				recursive: true,
-				force: true
+				force: true,
+				maxRetries: 5,
+				retryDelay: 100
 			});
 		}
 	}
@@ -508,6 +522,7 @@ console.log('Building Files Map');
 buildFileSet(mdaPackage);
 
 dynamicRootTypes = analyzeDynamicRootTypes(mapFiles);
+initTraitPathFieldMaps(analyzeTraitPathFields(mapFiles));
 
 console.log('Loading Custom Code');
 await buildSrcFoldersAndFiles();

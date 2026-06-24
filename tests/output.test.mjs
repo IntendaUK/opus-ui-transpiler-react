@@ -363,6 +363,90 @@ const createConditionalRootTypeSourceApp = () => {
 	return sourceApp;
 };
 
+const createDataTokenConditionalRootTypeSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-data-token-conditional-root-type');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const headerCellPath = join(sourceApp, 'app', 'dashboard', 'traits', 'grid', 'headerCell.json');
+	const actionHeaderCellPath = join(sourceApp, 'app', 'dashboard', 'traits', 'grid', 'actionHeaderCell.json');
+	const customHeaderCellPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'customHeaderCell', 'index.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//Two STATIC, condition-guarded visual traits (resolvable component paths)...
+	mkdirSync(dirname(headerCellPath), { recursive: true });
+	writeFileSync(headerCellPath, JSON.stringify({
+		type: 'container',
+		acceptPrps: { rowData: 'object' },
+		prps: { padding: true },
+		wgts: [{ type: 'label', prps: { cpt: '%rowData.caption%' } }]
+	}, null, '\t'), 'utf8');
+	writeFileSync(actionHeaderCellPath, JSON.stringify({
+		type: 'container',
+		acceptPrps: { rowData: 'object' },
+		prps: { padding: true },
+		wgts: [{ type: 'label', prps: { cpt: '%rowData.caption%' } }]
+	}, null, '\t'), 'utf8');
+
+	//...and a custom header-cell component the per-row data token resolves to at runtime.
+	mkdirSync(dirname(customHeaderCellPath), { recursive: true });
+	writeFileSync(customHeaderCellPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { rowData: 'object' },
+		prps: { flex: true },
+		wgts: [{ type: 'label', prps: { cpt: 'Custom header' } }]
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//A column config somewhere in the app supplies the concrete customHeaderCellTrait value, so it is
+	// statically discoverable. (Mirrors how real grid column configs carry the per-column trait path.)
+	sampleDashboard.wgts.push({
+		id: 'gridColumnConfigHost',
+		type: 'containerSimple',
+		prps: {
+			columnConfig: [
+				{ field: 'status', customHeaderCellTrait: '@myEnsemble/customHeaderCell/index' }
+			]
+		}
+	});
+
+	//A repeater whose row component is selected from THREE condition-guarded traits: two static and
+	// one whose trait reference is a per-row DATA TOKEN.
+	sampleDashboard.wgts.push({
+		id: 'dataTokenConditionalRootTypeRepeater',
+		type: 'repeater',
+		prps: {
+			staticData: [{ caption: 'Header', hasCustomHeaderCell: true }],
+			rowMda: {
+				id: 'data-token-conditional-((rowNumber))',
+				prps: { flex: true },
+				traits: [
+					{
+						condition: { operator: 'isFalsy', value: '{{rowData.isAction}}' },
+						trait: 'traits/grid/headerCell',
+						traitPrps: { rowData: '{{rowData}}' }
+					},
+					{
+						condition: { operator: 'isTruthy', value: '{{rowData.isAction}}' },
+						trait: 'traits/grid/actionHeaderCell',
+						traitPrps: { rowData: '{{rowData}}' }
+					},
+					{
+						condition: { operator: 'isTruthy', value: '{{rowData.hasCustomHeaderCell}}' },
+						trait: '((rowData.field.customHeaderCellTrait))',
+						traitPrps: { rowData: '{{rowData}}' }
+					}
+				]
+			}
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
 const createEvalDollarTokenSourceApp = () => {
 	const sourceApp = join(tmpRoot, 'source-app-eval-dollar-token');
 	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
@@ -2393,6 +2477,57 @@ test('generated rowMda with conditioned visual traits emits a per-row conditiona
 	assert.match(dispatcher, /import \{ isConditionMet \} from ["']@intenda\/opus-ui["'];/);
 	assert.match(dispatcher, /export const renderConditionalRootType =/);
 	assert.match(dispatcher, /conditionalRootTypes\.find\(\(?entry\)?\s*=>\s*isConditionMet\(entry\.condition\)/);
+});
+
+test('generated rowMda with a data-token conditional trait resolves it via a statically discovered component map', () => {
+	const sourceApp = createDataTokenConditionalRootTypeSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-data-token-conditional-root-type');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//The two static branches are still imported as component blueprints...
+	assert.match(dashboard, /import TraitsGridHeaderCell from ["']\.\/traits\/grid\/headerCell["'];/);
+	assert.match(dashboard, /import TraitsGridActionHeaderCell from ["']\.\/traits\/grid\/actionHeaderCell["'];/);
+	//...and so is the dynamically discovered custom header-cell component.
+	assert.match(dashboard, /import MyEnsembleCustomHeaderCellIndex from ["']\.\/@myEnsemble\/customHeaderCell\/index["'];/);
+	assert.match(dashboard, /import \{ renderConditionalRootType \} from ["']\.\.\/conditionalRootType["'];/);
+
+	assert.match(dashboard, /id="dataTokenConditionalRootTypeRepeater"/);
+	assert.match(dashboard, /type:\s*renderConditionalRootType/);
+	assert.match(dashboard, /conditionalRootTypes:\s*\[/);
+
+	//(a) All THREE entries are kept: the two static ones...
+	assert.match(dashboard, /type:\s*TraitsGridHeaderCell/);
+	assert.match(dashboard, /type:\s*TraitsGridActionHeaderCell/);
+	//...and the data-token one, which is NOT dropped: it carries a typeMap + the original token as typeKey.
+	assert.match(dashboard, /typeMap:\s*customHeaderCellTraitComponents/);
+	assert.match(dashboard, /typeKey:\s*"\(\(rowData\.field\.customHeaderCellTrait\)\)"/);
+
+	//(b) A path-keyed component map is emitted, keyed by the literal data value and valued by the import.
+	assert.match(
+		dashboard,
+		/const customHeaderCellTraitComponents = \{\s*"@myEnsemble\/customHeaderCell\/index":\s*MyEnsembleCustomHeaderCellIndex,?\s*\};/
+	);
+
+	//(d) The dispatcher resolves typeMap[typeKey] when there is no direct type.
+	const dispatcher = readFileSync(join(targetApp, 'src', 'conditionalRootType.jsx'), 'utf8');
+
+	assert.match(dispatcher, /match\.typeMap\s*\?\s*match\.typeMap\[match\.typeKey\]/);
 });
 
 test('generated functional trait de-duplicates imports for repeated srcAction handlers', () => {
