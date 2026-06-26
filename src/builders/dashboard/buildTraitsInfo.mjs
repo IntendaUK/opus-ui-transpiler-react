@@ -4,6 +4,7 @@ import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
 import generateComponent from './generateComponent.mjs';
 import pathToIdentifier from '../pathToIdentifier.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
+import { extractTraitTokenFieldName } from './analyzeTraitPathFields.mjs';
 
 const refMap = {};
 
@@ -91,6 +92,9 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 			return {
 				isDynamic: true,
 				expression: buildTraitAccessor(trait),
+				//The trait-prop field the runtime path comes from, so the emitted candidate map can be
+				// scoped to just that field's statically-discovered options.
+				field: extractTraitTokenFieldName(trait.trait ?? trait),
 				traitPrps: { ...trait.traitPrps },
 				auth: trait.auth,
 				condition: trait.condition

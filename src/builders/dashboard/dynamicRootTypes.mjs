@@ -6,6 +6,14 @@ let traitPathFieldMaps;
 let registeredTraitPathMaps = [];
 let traitPathMapNamesByField = {};
 
+let registeredDynamicTraitMaps = [];
+let dynamicTraitMapNamesByKey = {};
+
+//Whole-app discovery of FUNCTIONAL traits referenced dynamically (token / array / data-fed sites),
+// used to emit per-file direct-import maps in place of the old global resolveDynamicTrait registry.
+let dynamicTraitFieldCandidates = new Map();
+let dynamicTraitFlatCandidates = [];
+
 export const initDynamicRootTypes = ({
 	currentPath: _currentPath,
 	dynamicRootTypes: _dynamicRootTypes
@@ -15,6 +23,8 @@ export const initDynamicRootTypes = ({
 	componentMaps = [];
 	registeredTraitPathMaps = [];
 	traitPathMapNamesByField = {};
+	registeredDynamicTraitMaps = [];
+	dynamicTraitMapNamesByKey = {};
 };
 
 export const getDynamicRootTypeInfo = type => {
@@ -71,3 +81,36 @@ export const registerTraitPathComponentMap = (fieldName, entries) => {
 };
 
 export const getTraitPathComponentMaps = () => registeredTraitPathMaps;
+
+//Register a path-keyed FUNCTIONAL-trait map for a dynamic trait site. Unlike the component maps above,
+// these are emitted with lazy thunk values (see generateImports): the imported trait binding is only
+// touched when the trait is applied, not at module-init time. That avoids a temporal-dead-zone
+// ReferenceError when a file's map references a trait whose module is part of an import cycle back to
+// this file (the map literal would otherwise read a not-yet-initialised import during load).
+export const registerDynamicTraitMap = (key, entries) => {
+	if (dynamicTraitMapNamesByKey[key])
+		return dynamicTraitMapNamesByKey[key];
+
+	const name = `dynamicTraitMap_${key}`;
+
+	dynamicTraitMapNamesByKey[key] = name;
+
+	registeredDynamicTraitMaps.push({
+		name,
+		entries
+	});
+
+	return name;
+};
+
+export const getDynamicTraitMaps = () => registeredDynamicTraitMaps;
+
+//Discovered (whole-app) functional-trait candidates for dynamic trait sites. Initialised once per run.
+export const initDynamicTraitCandidates = ({ fieldCandidates, flatCandidates } = {}) => {
+	dynamicTraitFieldCandidates = fieldCandidates ?? new Map();
+	dynamicTraitFlatCandidates = flatCandidates ?? [];
+};
+
+export const getDynamicTraitFieldCandidates = field => dynamicTraitFieldCandidates.get(field) ?? [];
+
+export const getDynamicTraitFlatCandidates = () => dynamicTraitFlatCandidates;

@@ -1,3 +1,4 @@
+import { outputFolder } from '../../config.mjs';
 //Imports
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -9,7 +10,7 @@ import { join } from 'path';
 // transpiler would otherwise be unable to resolve to an @intenda package.
 // Returns null when there is no such local component.
 const findLocalComponentPath = componentType => {
-	const componentDir = join(process.cwd(), 'output', 'src', 'components', componentType);
+	const componentDir = join(outputFolder, 'src', 'components', componentType);
 
 	if (existsSync(componentDir))
 		return `components/${componentType}`;

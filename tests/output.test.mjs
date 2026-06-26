@@ -8,11 +8,16 @@ import { before, test } from 'node:test';
 
 import { transformTraitReferences } from '../src/builders/scriptAction.mjs';
 
-const outputRoot = resolve('output');
-const outputSrc = join(outputRoot, 'src');
+//The transpiler stages output per-target under output/<targetBasename> so concurrent/back-to-back
+// transpiles into different targets never share files (avoids Windows file-handle contention).
+const outputBaseDir = resolve('output');
 const fixtureSourceApp = resolve('tests', 'fixtures', 'source-app');
 const tmpRoot = resolve('tests', '.tmp');
 const fixtureTargetApp = join(tmpRoot, 'target-app');
+//outputRoot is the staging dir for the shared `before` build (target = fixtureTargetApp); the tests
+// that read generated output directly read from here.
+const outputRoot = join(outputBaseDir, basename(fixtureTargetApp));
+const outputSrc = join(outputRoot, 'src');
 
 const readOutputFile = (...parts) => readFileSync(join(outputRoot, ...parts), 'utf8');
 
@@ -300,6 +305,367 @@ const createRowMdaMustacheTraitsSourceApp = () => {
 	});
 
 	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createContextMenuWgtsTraitSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-context-menu-wgts-trait');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const menuItemPath = join(sourceApp, 'app', 'dashboard', 'traits', 'menu', 'menuItem.json');
+	const menuActionPath = join(sourceApp, 'app', 'dashboard', 'traits', 'menu', 'menuAction.json');
+	const contextMenuIndexPath = join(sourceApp, 'app', 'dashboard', 'traits', 'menu', 'contextMenuIndex.json');
+	const myContextMenuPath = join(sourceApp, 'app', 'dashboard', 'traits', 'menu', 'myContextMenu.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(menuItemPath), { recursive: true });
+
+	//A type-bearing component trait — the visual menu item.
+	writeFileSync(menuItemPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { cpt: 'string' },
+		prps: { cpt: '%cpt%' }
+	}, null, '\t'), 'utf8');
+
+	//A functional trait (acceptPrps, no type, no main trait) — a menu action behaviour.
+	writeFileSync(menuActionPath, JSON.stringify({
+		acceptPrps: { target: 'string' },
+		prps: {
+			canClick: true,
+			scps: [{
+				triggers: [{ event: 'onClick' }],
+				actions: [{ type: 'setState', target: '%target%', key: 'clicked', value: true }]
+			}]
+		}
+	}, null, '\t'), 'utf8');
+
+	//A functional trait that receives widgets and renders them as a dynamic context-menu MDA — mirrors
+	// @l2_context_menu/index, which stuffs the supplied wgts into prps.contextMenu.mda.wgts.
+	writeFileSync(contextMenuIndexPath, JSON.stringify({
+		acceptPrps: { wgts: { type: 'array', dft: [] } },
+		prps: {
+			contextMenu: {
+				mda: { type: 'containerSimple', wgts: '%wgts%' }
+			}
+		}
+	}, null, '\t'), 'utf8');
+
+	//The context-menu definition (mirrors viewDataObjectMenu): passes wgts to contextMenuIndex, each
+	// widget deriving its component type from menuItem (a component trait) and its behaviour from
+	// menuAction (a functional trait). These wgts are dynamic MDA the runtime renders, so the
+	// transpiler must lift menuItem to a real `type` and import menuAction as a functional trait —
+	// not leave them as trait-path strings resolved from app.json at runtime.
+	writeFileSync(myContextMenuPath, JSON.stringify({
+		acceptPrps: {},
+		traits: [{
+			trait: 'traits/menu/contextMenuIndex',
+			traitPrps: {
+				wgts: [{
+					traits: [
+						{ trait: 'traits/menu/menuItem', traitPrps: { cpt: 'View' } },
+						{ trait: 'traits/menu/menuAction', traitPrps: { target: '||panel||' } }
+					]
+				}]
+			}
+		}]
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//Reference the context-menu definition so it is included in the build.
+	sampleDashboard.wgts.push({
+		id: 'contextMenuHost',
+		traits: [{ trait: 'traits/menu/myContextMenu', traitPrps: {} }]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createDynamicWgtsTraitSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-dynamic-wgts-trait');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const fieldItemPath = join(sourceApp, 'app', 'dashboard', 'traits', 'header', 'fieldItem.json');
+	const dynamicWgtsHeaderPath = join(sourceApp, 'app', 'dashboard', 'traits', 'header', 'dynamicWgtsHeader.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	mkdirSync(dirname(fieldItemPath), { recursive: true });
+
+	//A component trait — the visual for a single field row.
+	writeFileSync(fieldItemPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { cpt: 'string' },
+		prps: { cpt: '%cpt%' }
+	}, null, '\t'), 'utf8');
+
+	//A component trait whose OWN wgts is a dynamic token: at runtime it receives an Opus MDA array via
+	// traitPrps (mirrors a data-object header rendering its field widgets). The array is `{ id, traits }`
+	// nodes, NOT pre-rendered React — so the transpiler must render it through wrapWidgets, not drop it
+	// in as a bare JSX child (which crashes React with "Objects are not valid as a React child").
+	writeFileSync(dynamicWgtsHeaderPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { fieldsMda: { type: 'array', dft: [] } },
+		prps: {},
+		wgts: '$fieldsMda$'
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//Reference the header, passing field widgets (each carrying the fieldItem component trait) as the
+	// dynamic wgts — exactly the shape the object builder produces at runtime.
+	sampleDashboard.wgts.push({
+		id: 'dynamicWgtsHost',
+		traits: [{
+			trait: 'traits/header/dynamicWgtsHeader',
+			traitPrps: {
+				fieldsMda: [{
+					traits: [{ trait: 'traits/header/fieldItem', traitPrps: { cpt: 'Field A' } }]
+				}]
+			}
+		}]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createNestedFunctionalTraitRefSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-nested-functional-trait-ref');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const behaviourTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'behaviour', 'index.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A FUNCTIONAL trait (no type, no main trait — just behaviour). Referenced from MDA by path, it
+	// would otherwise be resolved from app.json at runtime via getTrait.
+	mkdirSync(dirname(behaviourTraitPath), { recursive: true });
+	writeFileSync(behaviourTraitPath, JSON.stringify({
+		acceptPrps: {},
+		prps: {
+			scps: [{
+				triggers: [{ event: 'onMount' }],
+				actions: [{ type: 'setState', key: 'mounted', value: true }]
+			}]
+		}
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//A functional-trait reference nested deep under a non-render key (tOpenTab.value.tabContents.traits)
+	// — not a render-MDA position, so only the final catch-all output pass can convert it.
+	sampleDashboard.wgts.push({
+		id: 'behaviourTabOpener',
+		type: 'containerSimple',
+		prps: {
+			canClick: true,
+			fireScript: {
+				actions: [{
+					type: 'setState',
+					target: 'appTabManager',
+					key: 'tOpenTab',
+					value: {
+						tabId: 'behaviour-tab',
+						tabContents: {
+							traits: [{ trait: '@myEnsemble/behaviour/index', traitPrps: {} }]
+						}
+					}
+				}]
+			}
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createSpreadTraitRefSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-spread-trait-ref');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const spreadTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'spread', 'recordChangedTrait.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A SPREAD trait: it has a traitArray (a list of actions spliced into the surrounding script), no
+	// own type and no main trait. Referenced by path it would otherwise be resolved from app.json at
+	// runtime via getTrait.
+	mkdirSync(dirname(spreadTraitPath), { recursive: true });
+	writeFileSync(spreadTraitPath, JSON.stringify({
+		acceptPrps: {
+			originalRecord: 'object',
+			modifiedRecord: 'object'
+		},
+		traitArray: [{
+			type: 'applyComparison',
+			operator: 'isEqual',
+			value: '%originalRecord%',
+			compareValue: '%modifiedRecord%',
+			branch: {
+				true: [{ type: 'setState', key: 'changed', value: false }],
+				false: [{ type: 'setState', key: 'changed', value: true }]
+			}
+		}]
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//A node whose script references the spread trait by path inside its actions (the conventional
+	// `{ traits: [{ trait, traitPrps }] }` action-trait shape the runtime splices in).
+	sampleDashboard.wgts.push({
+		id: 'spreadTraitHost',
+		type: 'containerSimple',
+		prps: {
+			scps: [{
+				triggers: [{ event: 'onMount' }],
+				actions: [{
+					traits: [{
+						trait: '@myEnsemble/spread/recordChangedTrait',
+						traitPrps: {
+							originalRecord: '{{state.self.record}}',
+							modifiedRecord: '{{state.self.modifiedRecord}}'
+						}
+					}]
+				}]
+			}]
+		}
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+const createTraitPropDefaultSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-trait-prop-default');
+	const rowTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'row', 'index.json');
+	const componentPropsPath = join(sourceApp, 'src', 'components', 'myWidget', 'props.js');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A component trait the widget applies to each row it builds.
+	mkdirSync(dirname(rowTraitPath), { recursive: true });
+	writeFileSync(rowTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { label: 'string' },
+		prps: { cpt: '%label%' }
+	}, null, '\t'), 'utf8');
+
+	//A hand-written local component whose prop spec declares a `traits<Suffix>` array prop with a
+	// DEFAULT trait path nested in `dft: () => [...]`. The catch-all's `traitsX: [...]` (literal-array)
+	// pass doesn't reach it, so the path would otherwise stay a string resolved from app.json at runtime.
+	mkdirSync(dirname(componentPropsPath), { recursive: true });
+	writeFileSync(componentPropsPath, [
+		'export default {',
+		'  traitsRowItems: {',
+		'    type: "array",',
+		'    desc: "Traits applied to each built row",',
+		'    dft: () => ["@myEnsemble/row/index"],',
+		'  },',
+		'};',
+		''
+	].join('\n'), 'utf8');
+
+	return sourceApp;
+};
+
+const createBacktickTraitRefSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-backtick-trait-ref');
+	const cellTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'cell', 'index.json');
+	const buildCellPath = join(sourceApp, 'src', 'components', 'myWidget', 'buildCell.js');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A component trait referenced below via a template literal (backtick) rather than a quoted string.
+	mkdirSync(dirname(cellTraitPath), { recursive: true });
+	writeFileSync(cellTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { label: 'string' },
+		prps: { cpt: '%label%' }
+	}, null, '\t'), 'utf8');
+
+	//A hand-written local component that references the trait with a STATIC backtick literal (no
+	// interpolation). The catch-all only matched ' / " quotes, so this path stayed a string resolved
+	// from app.json at runtime.
+	mkdirSync(dirname(buildCellPath), { recursive: true });
+	writeFileSync(buildCellPath, [
+		'const buildCell = () => ({',
+		'  traits: [{ trait: `@myEnsemble/cell/index`, traitPrps: { label: "Cell" } }],',
+		'});',
+		'',
+		'export default buildCell;',
+		''
+	].join('\n'), 'utf8');
+
+	return sourceApp;
+};
+
+const createDynamicBacktickTraitRefSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-dynamic-backtick-trait-ref');
+	const primaryTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'btn', 'primary', 'index.json');
+	const secondaryTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'btn', 'secondary', 'index.json');
+	const buildBtnPath = join(sourceApp, 'src', 'components', 'myWidget', 'buildBtn.js');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//Two button-variant component traits the template below can resolve to at runtime.
+	mkdirSync(dirname(primaryTraitPath), { recursive: true });
+	mkdirSync(dirname(secondaryTraitPath), { recursive: true });
+	writeFileSync(primaryTraitPath, JSON.stringify({ type: 'containerSimple', acceptPrps: {}, prps: { cpt: 'Primary' } }, null, '\t'), 'utf8');
+	writeFileSync(secondaryTraitPath, JSON.stringify({ type: 'containerSimple', acceptPrps: {}, prps: { cpt: 'Secondary' } }, null, '\t'), 'utf8');
+
+	//A hand-written component that references the trait via an INTERPOLATED template literal — the
+	// component segment is only known at runtime (`type`). This can't be a single import; it needs a
+	// map of the statically-discoverable candidates keyed by the interpolated value.
+	mkdirSync(dirname(buildBtnPath), { recursive: true });
+	writeFileSync(buildBtnPath, [
+		'const buildBtn = (type) => ({',
+		'  traits: [{ trait: `@myEnsemble/btn/${type}/index`, traitPrps: {} }],',
+		'});',
+		'',
+		'export default buildBtn;',
+		''
+	].join('\n'), 'utf8');
+
+	return sourceApp;
+};
+
+const createThemeFunctionTraitSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-theme-function-trait');
+	const rowTraitPath = join(sourceApp, 'app', 'dashboard', '@myEnsemble', 'row', 'index.json');
+	const themePath = join(sourceApp, 'app', 'theme', 'myFunctions.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A component trait the theme function references when building MDA.
+	mkdirSync(dirname(rowTraitPath), { recursive: true });
+	writeFileSync(rowTraitPath, JSON.stringify({
+		type: 'containerSimple',
+		acceptPrps: { label: 'string' },
+		prps: { cpt: '%label%' }
+	}, null, '\t'), 'utf8');
+
+	//A theme function module: an eval'd `fn` string (with $arg$ tokens) that builds MDA referencing the
+	// trait by path. As a string, that path resolves from app.json at runtime; emitted as a real closure
+	// it resolves from a lexical import instead.
+	mkdirSync(dirname(themePath), { recursive: true });
+	writeFileSync(themePath, JSON.stringify({
+		buildRows: {
+			acceptArgs: { rows: { type: 'array' } },
+			fn: "const rows = $rows$; const res = rows.map(r => ({ id: r.id, traits: [{ trait: '@myEnsemble/row/index', traitPrps: { label: r.label } }] })); res;"
+		}
+	}, null, '\t'), 'utf8');
 
 	return sourceApp;
 };
@@ -1309,7 +1675,8 @@ const createMorphCaretConditionSourceApp = () => {
 };
 
 before(() => {
-	rmSync(outputRoot, { recursive: true, force: true });
+	//Clean the whole per-target output base (every test stages under output/<targetBasename>).
+	rmSync(outputBaseDir, { recursive: true, force: true });
 	rmSync(tmpRoot, { recursive: true, force: true });
 
 	//The fixture's dashboards use these component types; declare the libraries that provide them in
@@ -1394,7 +1761,7 @@ test('generated non-main JSX files have expected React/export structure', () => 
 		.filter(file => basename(file) !== 'helpers.jsx')
 		.filter(file => basename(file) !== 'conditionalRootType.jsx')
 		.filter(file => basename(file) !== 'dynamicTypeComponent.jsx')
-		.filter(file => basename(file) !== 'dynamicTraits.jsx')
+		.filter(file => basename(file) !== 'renderWgts.jsx')
 		.filter(file => {
 			const label = relative(outputSrc, file);
 
@@ -1809,6 +2176,270 @@ test('catch-all trait conversion does not duplicate an already-imported componen
 	assert.match(dashboard, /trait:\s*MyEnsembleSharedIndex\b/);
 });
 
+test('a component trait whose own wgts is a dynamic token renders the value through renderWgts (not a raw React child)', () => {
+	const sourceApp = createDynamicWgtsTraitSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-dynamic-wgts-trait');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const header = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'header', 'dynamicWgtsHeader.jsx'),
+		'utf8'
+	);
+
+	//The dynamic wgts token is rendered through renderWgts, which handles both runtime shapes the
+	// value can take: pre-transpiled React elements (rendered as-is) or raw Opus MDA (run through
+	// wrapWidgets, turning each `{ id, traits }` node into a real element).
+	assert.match(header, /import \{ renderWgts \} from ["'][^"']*renderWgts["'];/);
+	assert.match(header, /renderWgts\(traitPrps\.fieldsMda\)/);
+
+	//The raw MDA array is NEVER dropped in as a bare JSX child — that is the "Objects are not valid as
+	// a React child" crash this guards against.
+	assert.doesNotMatch(header, />\s*\{\s*traitPrps\.fieldsMda\s*\}\s*</);
+
+	//The generated renderWgts helper module exists and distinguishes elements from raw MDA.
+	const helper = readFileSync(join(targetApp, 'src', 'renderWgts.jsx'), 'utf8');
+	assert.match(helper, /React\.isValidElement/);
+	assert.match(helper, /wrapWidgets\(\{[^}]*wgts:/);
+});
+
+test('context-menu wgts passed as trait props lift their component trait to a type and import functional traits', () => {
+	const sourceApp = createContextMenuWgtsTraitSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-context-menu-wgts-trait');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const contextMenu = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'menu', 'myContextMenu.jsx'),
+		'utf8'
+	);
+
+	//Both the component trait and the functional trait are imported directly...
+	assert.match(contextMenu, /import TraitsMenuMenuItem from ["']\.\/menuItem["'];/);
+	assert.match(contextMenu, /import TraitsMenuMenuAction from ["']\.\/menuAction["'];/);
+
+	//...the component trait (menuItem) is lifted to a real `type` on the widget (this is what gives
+	// the runtime a React component to render — without it the widget is bare `{ id, traits }` MDA
+	// that React rejects as a child)...
+	assert.match(contextMenu, /type:\s*TraitsMenuMenuItem\b/);
+
+	//...and the sibling functional trait (menuAction) is emitted as an applied functional trait
+	// ({ type: fn }) rather than a trait-path string.
+	assert.match(contextMenu, /traits:\s*\[\s*\{\s*type:\s*TraitsMenuMenuAction\b/);
+
+	//No trait-path strings survive for these widgets — nothing routes to runtime app.json resolution.
+	assert.doesNotMatch(contextMenu, /trait:\s*["']traits\/menu\/menuItem["']/);
+	assert.doesNotMatch(contextMenu, /trait:\s*["']traits\/menu\/menuAction["']/);
+});
+
+test('functional-trait references in MDA are converted to direct imports (no app.json resolution)', () => {
+	const sourceApp = createNestedFunctionalTraitRefSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-nested-functional-trait-ref');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//The functional-trait path string is rewritten to a direct import of the transpiled functional
+	// trait module, and used in place of the string — so it applies without any app.json lookup.
+	assert.match(dashboard, /import MyEnsembleBehaviourIndex from ["'][^"']*@myEnsemble\/behaviour\/index["'];/);
+	assert.match(dashboard, /trait:\s*MyEnsembleBehaviourIndex\b/);
+	assert.doesNotMatch(dashboard, /trait:\s*["']@myEnsemble\/behaviour\/index["']/);
+});
+
+test('spread-trait references in MDA are converted to direct imports (no app.json resolution)', () => {
+	const sourceApp = createSpreadTraitRefSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-spread-trait-ref');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
+
+	//A spread trait (traitArray) referenced by path is rewritten to a direct import of the transpiled
+	// spread-trait module and used in place of the string — so the runtime applies it (token
+	// substitution + traitArray splice) without resolving it from app.json via getTrait.
+	assert.match(dashboard, /import MyEnsembleSpreadRecordChangedTrait from ["'][^"']*@myEnsemble\/spread\/recordChangedTrait["'];/);
+	assert.match(dashboard, /trait:\s*MyEnsembleSpreadRecordChangedTrait\b/);
+	assert.doesNotMatch(dashboard, /trait:\s*["']@myEnsemble\/spread\/recordChangedTrait["']/);
+
+	//The spread-trait module itself still exports its { acceptPrps, traitArray } object.
+	const spreadTrait = readFileSync(join(targetApp, 'src', 'dashboard', '@myEnsemble', 'spread', 'recordChangedTrait.jsx'), 'utf8');
+	assert.match(spreadTrait, /traitArray\s*:/);
+	assert.match(spreadTrait, /export default \w+;/);
+});
+
+test('trait-path strings in a traits<Suffix> prop default are converted to direct imports', () => {
+	const sourceApp = createTraitPropDefaultSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-trait-prop-default');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const props = readFileSync(join(targetApp, 'src', 'components', 'myWidget', 'props.js'), 'utf8');
+
+	//The trait path nested in `dft: () => [...]` is rewritten to a direct import of the transpiled
+	// component, in place (the prop-spec structure is preserved) — no app.json resolution at runtime.
+	assert.match(props, /import MyEnsembleRowIndex from ["'][^"']*dashboard\/@myEnsemble\/row\/index["'];/);
+	assert.match(props, /dft:\s*\(\s*\)\s*=>\s*\[\s*MyEnsembleRowIndex\s*\]/);
+	assert.doesNotMatch(props, /["']@myEnsemble\/row\/index["']/);
+});
+
+test('static backtick (template-literal) trait references are converted to direct imports', () => {
+	const sourceApp = createBacktickTraitRefSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-backtick-trait-ref');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const buildCell = readFileSync(join(targetApp, 'src', 'components', 'myWidget', 'buildCell.js'), 'utf8');
+
+	//A static backtick trait path is rewritten to a direct import, same as a quoted one.
+	assert.match(buildCell, /import MyEnsembleCellIndex from ["'][^"']*dashboard\/@myEnsemble\/cell\/index["'];/);
+	assert.match(buildCell, /trait:\s*MyEnsembleCellIndex\b/);
+	assert.doesNotMatch(buildCell, /trait:\s*`@myEnsemble\/cell\/index`/);
+});
+
+test('dynamic (interpolated) backtick trait template becomes a candidate import map', () => {
+	const sourceApp = createDynamicBacktickTraitRefSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-dynamic-backtick-trait-ref');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const buildBtn = readFileSync(join(targetApp, 'src', 'components', 'myWidget', 'buildBtn.js'), 'utf8');
+
+	//The two discoverable candidates are imported and put in a map keyed by the interpolated segment,
+	// and the reference becomes map[<the interpolation expression>] — no app.json lookup, no string path.
+	assert.match(buildBtn, /import MyEnsembleBtnPrimaryIndex from /);
+	assert.match(buildBtn, /import MyEnsembleBtnSecondaryIndex from /);
+	assert.match(buildBtn, /["']?primary["']?:\s*MyEnsembleBtnPrimaryIndex/);
+	assert.match(buildBtn, /["']?secondary["']?:\s*MyEnsembleBtnSecondaryIndex/);
+	assert.match(buildBtn, /trait:\s*\w+\[type\]/);
+	assert.doesNotMatch(buildBtn, /`@myEnsemble\/btn\/\$\{type\}\/index`/);
+});
+
+test('theme function modules are emitted as real closures with trait imports (no eval string)', () => {
+	const sourceApp = createThemeFunctionTraitSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-theme-function-trait');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const theme = readFileSync(join(targetApp, 'src', 'themes', 'myFunctions.jsx'), 'utf8');
+
+	//The eval'd `fn` string is emitted as a real arrow that destructures-by-reference from the args
+	// object; $arg$ tokens become args.<name>, and the final expression is returned.
+	assert.match(theme, /fn:\s*\(\s*args\s*\)\s*=>/);
+	assert.doesNotMatch(theme, /fn:\s*["']/);
+	assert.match(theme, /args\.rows/);
+	assert.match(theme, /return res;/);
+
+	//The trait path inside the (now real) function body is converted to a lexical import — no app.json.
+	assert.match(theme, /import MyEnsembleRowIndex from /);
+	assert.match(theme, /trait:\s*MyEnsembleRowIndex\b/);
+	assert.doesNotMatch(theme, /['"]@myEnsemble\/row\/index['"]/);
+});
+
 test('rowMda node with its own type and a type-bearing main trait emits a single type key', () => {
 	const sourceApp = createRowMdaOwnTypePlusMainTraitSourceApp();
 	const targetApp = join(tmpRoot, 'target-app-rowmda-type-main-trait');
@@ -2021,20 +2652,43 @@ test('generated dynamic traits are resolved and applied at runtime', () => {
 	const dashboard = readFileSync(join(outputSrc, 'dashboard', 'sampleDashboard.jsx'), 'utf8');
 	const dynamicTrait = readFileSync(join(outputSrc, 'dashboard', 'traits', 'dynamic', 'containerTrait.jsx'), 'utf8');
 	const dynamicArrayTrait = readFileSync(join(outputSrc, 'dashboard', 'traits', 'dynamic', 'arrayContainerTrait.jsx'), 'utf8');
-	const dynamicTraitsRegistry = readFileSync(join(outputSrc, 'dynamicTraits.jsx'), 'utf8');
 
 	assert.match(dashboard, /<TraitsDynamicContainerTrait\s+id="dynamicTraitComponent"[\s\S]*traitPrps=\{\{ dynamicTrait: "traits\/dynamic\/dataTrait" \}\}/);
 	assert.match(dashboard, /<TraitsDynamicArrayContainerTrait\s+id="dynamicTraitArrayComponent"[\s\S]*traitPrps=\{\{\s*traits:\s*\[/);
-	assert.match(dynamicTrait, /import \{ resolveDynamicTrait \} from ["']\.\.\/\.\.\/\.\.\/dynamicTraits["'];/);
-	assert.match(dynamicTrait, /TraitsStaticStaticFunctionalTrait\(\{\}\)/);
-	assert.match(dynamicTrait, /resolveDynamicTrait\(traitPrps\.dynamicTrait\)\?\.\(\{\}\)/);
+
+	//Single-token dynamic trait: a local map of direct imports replaces the old global
+	// resolveDynamicTrait registry. The map is keyed by the runtime trait-path value.
+	assert.doesNotMatch(dynamicTrait, /resolveDynamicTrait/);
+	assert.match(dynamicTrait, /import TraitsDynamicDataTrait from /);
+	//Map values are lazy thunks (binding read at apply time, not module load) to avoid TDZ in cycles.
+	assert.match(dynamicTrait, /["']traits\/dynamic\/dataTrait["']:\s*\([^)]*\)\s*=>\s*TraitsDynamicDataTrait\b/);
+	//The runtime ref may already be a directly-imported trait function (handler/MDA built it as
+	// { trait: <importedFn> }) — call it directly; otherwise look it up in the map.
+	assert.match(dynamicTrait, /typeof\s*\(?traitPrps\.dynamicTrait\)?\s*===\s*["']function["']\s*\?\s*traitPrps\.dynamicTrait\s*:\s*\w+\[traitPrps\.dynamicTrait\]/);
 	assert.doesNotMatch(dynamicTrait, /%dynamicTrait%/);
-	assert.match(dynamicArrayTrait, /import \{ resolveDynamicTrait \} from ["']\.\.\/\.\.\/\.\.\/dynamicTraits["'];/);
-	assert.match(dynamicArrayTrait, /\.\.\.\(traitPrps\.traits \?\? \[\]\)\.map\(/);
-	assert.match(dynamicArrayTrait, /resolveDynamicTrait\(.*(?:trait\.trait|traitPath).*?\)\?\.\(.*(?:trait\.traitPrps|traitPrps).*?\)/s);
-	assert.doesNotMatch(dynamicArrayTrait, /resolveDynamicTrait\(traitPrps\.\)\?\.\(\{\}\)/);
-	assert.match(dynamicTraitsRegistry, /import TraitsDynamicDataTrait from ["']\.\/dashboard\/traits\/dynamic\/dataTrait["'];/);
-	assert.match(dynamicTraitsRegistry, /["']traits\/dynamic\/dataTrait["']:\s*TraitsDynamicDataTrait/);
+	//Imports resolve to the transpiled module, not the raw .json.
+	assert.doesNotMatch(dynamicTrait, /import TraitsDynamicDataTrait from ["'][^"']*\.json["']/);
+
+	//Array dynamic trait: a local map keyed by the runtime trait path, no global registry import.
+	assert.doesNotMatch(dynamicArrayTrait, /resolveDynamicTrait/);
+	assert.match(dynamicArrayTrait, /\(traitPrps\.traits \?\? \[\]\)\.map\(/);
+	//Each element ref is called directly if it is already a function, else resolved via the map.
+	assert.match(dynamicArrayTrait, /typeof\s*\(?traitRef\)?\s*===\s*["']function["']\s*\?\s*traitRef\s*:\s*\w+\[traitRef\]/);
+	assert.match(dynamicArrayTrait, /\?\.\(\s*trait\.traitPrps \?\? \{\}/);
+
+	//The global dynamic-trait registry module is gone entirely.
+	assert.ok(!existsSync(join(outputSrc, 'dynamicTraits.jsx')), 'Expected dynamicTraits.jsx to no longer be generated');
+});
+
+test('no generated file depends on the global resolveDynamicTrait registry', () => {
+	//Full elimination: nothing in the output imports a dynamicTraits module or references the old
+	// global resolveDynamicTrait function — every dynamic trait site resolves through a local map.
+	const offenders = listFilesRecursive(outputSrc)
+		.filter(file => ['.js', '.jsx'].includes(extname(file)))
+		.filter(file => /from\s+["'][^"']*\/dynamicTraits["']/.test(readFileSync(file, 'utf8')))
+		.map(file => relative(outputSrc, file));
+
+	assert.deepEqual(offenders, [], `Expected no dynamicTraits imports, found in: ${offenders.join(', ')}`);
 });
 
 test('generated nested conditional only-child component is wrapped as JSX expression', () => {
@@ -2157,14 +2811,14 @@ test('transpiler preserves configured target src folders during replacement', ()
 	assertFileExists(join(preserveTargetApp, 'src', 'dashboard', 'sampleDashboard.jsx'));
 });
 
-test('transpiler preserves existing target src themes by default', () => {
-	const preserveTargetApp = join(tmpRoot, 'target-app-preserve-themes');
-	const preservedTheme = join(preserveTargetApp, 'src', 'themes', 'colors.jsx');
+test('transpiler regenerates target src themes by default (themes are not in the preserved-src list)', () => {
+	const preserveTargetApp = join(tmpRoot, 'target-app-regenerate-themes');
+	const themeFile = join(preserveTargetApp, 'src', 'themes', 'colors.jsx');
 	const customTheme = 'const Theme = { colors: { primary: "custom" } };\nexport default Theme;\n';
 
 	rmSync(preserveTargetApp, { recursive: true, force: true });
-	mkdirSync(dirname(preservedTheme), { recursive: true });
-	writeFileSync(preservedTheme, customTheme, 'utf8');
+	mkdirSync(dirname(themeFile), { recursive: true });
+	writeFileSync(themeFile, customTheme, 'utf8');
 
 	execFileSync(process.execPath, ['src/transpile.mjs'], {
 		cwd: process.cwd(),
@@ -2177,7 +2831,13 @@ test('transpiler preserves existing target src themes by default', () => {
 		stdio: 'pipe'
 	});
 
-	assert.equal(readFileSync(preservedTheme, 'utf8'), customTheme);
+	//Themes are no longer a default preserved-src folder (defaultPreservedSrcFolders is empty), so a
+	// stale hand-edited theme is replaced by the freshly transpiled one — themes must be regenerated as
+	// real modules (closures over imports) for app.json-free runtime, not kept from a previous build.
+	const regenerated = readFileSync(themeFile, 'utf8');
+	assert.notEqual(regenerated, customTheme);
+	assert.match(regenerated, /^const Theme = /m);
+	assert.match(regenerated, /^export default Theme;$/m);
 	assertFileExists(join(preserveTargetApp, 'src', 'dashboard', 'sampleDashboard.jsx'));
 });
 
@@ -2424,9 +3084,12 @@ test('generated rowMda preserves mustache rowData traits for repeater runtime', 
 	const dashboard = readFileSync(join(targetApp, 'src', 'dashboard', 'sampleDashboard.jsx'), 'utf8');
 
 	assert.match(dashboard, /id="rowMdaMustacheTraitsRepeater"/);
-	assert.match(dashboard, /import \{ resolveDynamicTrait \} from ["']\.\.\/dynamicTraits["'];/);
+	//No global registry import; the per-row path resolves through a local map of direct imports.
+	assert.doesNotMatch(dashboard, /from ["'][^"']*\/dynamicTraits["']/);
 	assert.match(dashboard, /traits:\s*"{{rowData\.traits}}"/);
-	assert.match(dashboard, /resolveDynamicTrait:\s*resolveDynamicTrait/);
+	assert.match(dashboard, /resolveDynamicTrait:\s*\(?traitPath\)? =>\s*\w+\[traitPath\]/);
+	assert.match(dashboard, /import TraitsRowRowFunctionalTrait from /);
+	assert.match(dashboard, /["']traits\/row\/rowFunctionalTrait["']:\s*\([^)]*\)\s*=>\s*TraitsRowRowFunctionalTrait\b/);
 });
 
 test('generated rowMda with conditioned visual traits emits a per-row conditional component selector', () => {
@@ -2775,7 +3438,8 @@ test('trait-list prop string elements are converted to direct trait-module impor
 	//A path with no matching trait file is left untouched.
 	assert.match(output, /["']@menu\/tree\/functional\/unknownTrait["']/);
 
-	//The component's own `traits: [{ trait }]` array is handled by the component-trait pass: this
-	// reference is a functional trait, so it is intentionally left as a string there.
-	assert.match(output, /traits:\s*\[\{\s*trait:\s*["']@menu\/tree\/functional\/setBg["']\s*\}\]/);
+	//The component's own `traits: [{ trait }]` array: this functional-trait reference is now also
+	// rewritten to a direct import, so it applies without resolving from JSON metadata at runtime.
+	assert.match(output, /traits:\s*\[\{\s*trait:\s*MenuTreeFunctionalSetBg\s*\}\]/);
+	assert.doesNotMatch(output, /traits:\s*\[\{\s*trait:\s*["']@menu\/tree\/functional\/setBg["']/);
 });

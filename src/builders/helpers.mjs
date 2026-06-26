@@ -1,3 +1,4 @@
+import { outputFolder } from '../config.mjs';
 //Imports
 import { mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -111,21 +112,69 @@ const dynamicTypeComponentTemplate = `
 	};
 `;
 
+//Renders a component's own `wgts` when it is a dynamic trait-prop token, whose runtime value can be
+// either shape:
+//   1. Already-rendered React elements — a caller passed static Opus MDA that the transpiler turned
+//      into JSX (e.g. a modal panel's `wgtsTop: <>…</>`). These render as-is.
+//   2. Raw Opus MDA objects (`{ id, traits }`) built at runtime by a script/handler (e.g. an object
+//      builder's field widgets). These go through wrapWidgets so each node becomes a real element
+//      (resolving a tagged component trait to its imported component).
+// The transpiler can't tell which a given site receives — it depends on the caller — so decide at
+// runtime. This replaces the old bare `{traitPrps.x}` child, which crashed React when x was raw MDA.
+const renderWgtsTemplate = `
+	import React from 'react';
+	import { wrapWidgets, Component } from '@intenda/opus-ui';
+
+	//Fallback for a raw MDA node that wrapWidgets can't render on its own — i.e. a node with no tagged
+	// component trait and no function type, such as a plain container or a string-trait node. Routing it
+	// through the Opus Wrapper renders it the same way the runtime renders any dynamically-typed node, so
+	// renderWgts handles ANY MDA shape, not only widgets that carry a transpiled component trait.
+	const ChildWgt = ({ mda }) => <Component mda={mda} />;
+
+	export const renderWgts = value => {
+		if (value === null || value === undefined)
+			return null;
+
+		//A single React element/fragment (transpiled static wgts) renders directly.
+		if (React.isValidElement(value))
+			return value;
+
+		if (Array.isArray(value)) {
+			//A list of already-rendered elements renders directly; anything else is raw Opus MDA.
+			if (value.every(React.isValidElement))
+				return value;
+
+			return wrapWidgets({ ChildWgt, wgts: value });
+		}
+
+		//A lone raw MDA node.
+		if (typeof value === 'object')
+			return wrapWidgets({ ChildWgt, wgts: [value] });
+
+		//A primitive (string/number) is already a valid React child.
+		return value;
+	};
+`;
+
 //Builder
 const buildHelpers = () => {
-	const outputPath = join('output', 'src', 'helpers.jsx');
+	const outputPath = join(outputFolder, 'src', 'helpers.jsx');
 
 	mkdirSync(dirname(outputPath), { recursive: true });
 
 	writeFileSync(outputPath, template, 'utf8');
 
-	const conditionalRootTypePath = join('output', 'src', 'conditionalRootType.jsx');
+	const conditionalRootTypePath = join(outputFolder, 'src', 'conditionalRootType.jsx');
 
 	writeFileSync(conditionalRootTypePath, conditionalRootTypeTemplate, 'utf8');
 
-	const dynamicTypeComponentPath = join('output', 'src', 'dynamicTypeComponent.jsx');
+	const dynamicTypeComponentPath = join(outputFolder, 'src', 'dynamicTypeComponent.jsx');
 
 	writeFileSync(dynamicTypeComponentPath, dynamicTypeComponentTemplate, 'utf8');
+
+	const renderWgtsPath = join(outputFolder, 'src', 'renderWgts.jsx');
+
+	writeFileSync(renderWgtsPath, renderWgtsTemplate, 'utf8');
 };
 
 export default buildHelpers;

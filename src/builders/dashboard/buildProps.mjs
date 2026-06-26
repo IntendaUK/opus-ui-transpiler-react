@@ -3,17 +3,19 @@ import { getIsTrait } from './isTrait.mjs';
 import { getOriginalPath } from './originalFile.mjs';
 import { pushToScriptImports } from './scriptImports.mjs';
 import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
-import { setNeedsDynamicTraitResolver, setNeedsConditionalRootType } from './generateImports.mjs';
+import { setNeedsConditionalRootType } from './generateImports.mjs';
 import { getTraitImports, pushToTraitImports } from './traitImports.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
 import {
 	getTraitPathFieldEntries,
-	registerTraitPathComponentMap
+	registerTraitPathComponentMap,
+	getDynamicTraitFlatCandidates
 } from './dynamicRootTypes.mjs';
 import { extractTraitTokenFieldName } from './analyzeTraitPathFields.mjs';
 
 //Helpers
 import buildTraitsInfo from './buildTraitsInfo.mjs';
+import buildDynamicTraitMap from './buildDynamicTraitMap.mjs';
 import identifyMainTrait from './identifyMainTrait.mjs';
 import findComponentLibraryName from './findComponentLibraryName.mjs';
 import findLocalComponentPath from './findLocalComponentPath.mjs';
@@ -75,7 +77,15 @@ const ARRAY_MERGE_PRPS = [
 // resolveDynamicTrait) rather than leaving raw metadata that would be resolved from JSON at runtime.
 // Covers repeater/treeview templates (rowMda/mdaLabel/mdaExpander), and widgets bound for extraWgts
 // whether built inline (setState value) or via mapArray (mapTo).
-const RENDER_MDA_KEYS = new Set(['rowMda', 'mdaLabel', 'mdaExpander', 'mapTo', 'extraWgts']);
+//
+// `wgts` is included because a `wgts` array nested inside MDA is always dynamic widgets the runtime
+// renders from metadata — e.g. a context menu's `prps.contextMenu.mda.wgts`, or the `wgts` passed as
+// trait props into a menu/container trait. (A component's OWN children never reach here: generateComponent
+// destructures `wgts` off the node and emits them as JSX children, so buildProps only ever sees a `wgts`
+// key when it is nested data.) Lifting these widgets' main visual trait to a real `type` and importing
+// their functional traits is what lets the runtime render them as React instead of leaving bare
+// `{ id, traits }` metadata (which React rejects as a child) routed to app.json trait resolution.
+const RENDER_MDA_KEYS = new Set(['rowMda', 'mdaLabel', 'mdaExpander', 'mapTo', 'extraWgts', 'wgts']);
 
 const isRenderMdaKey = (key, parent) => {
 	if (RENDER_MDA_KEYS.has(key))
@@ -130,8 +140,12 @@ const buildProps = ({
 		Object.assign(combined, prps);
 
 	if (!isInRowMda && hasDynamicRowTraits(combined.rowMda)) {
-		combined.resolveDynamicTrait = 'resolveDynamicTrait';
-		setNeedsDynamicTraitResolver(true);
+		//The repeater resolves each row's `{{rowData.traits}}` path through this function. Instead of the
+		// old global registry, give it a local resolver over a per-file map of directly-imported
+		// functional-trait candidates (discovered statically across MDA + handler source).
+		const mapName = buildDynamicTraitMap('array', getDynamicTraitFlatCandidates());
+
+		combined.resolveDynamicTrait = `traitPath => ${mapName}[traitPath]`;
 	}
 
 	const lines = [];
@@ -215,7 +229,8 @@ const buildProps = ({
 			}
 		} else if (isInRowMda && k === 'traits') {
 			if (isMustacheAccessor(v)) {
-				setNeedsDynamicTraitResolver(true);
+				//A per-row data-driven traits path; the repeater substitutes it and resolves it through
+				// the local resolveDynamicTrait function injected on the repeater's props (see above).
 				lines.push(`${key}: ${JSON.stringify(v)}`);
 
 				return;

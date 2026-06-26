@@ -2,7 +2,7 @@
 import { getUsedComponentTypes } from './usedComponentTypes.mjs';
 import { getScriptImports } from './scriptImports.mjs';
 import { getTraitImports } from './traitImports.mjs';
-import { getDynamicRootTypeComponentMaps, getTraitPathComponentMaps } from './dynamicRootTypes.mjs';
+import { getDynamicRootTypeComponentMaps, getTraitPathComponentMaps, getDynamicTraitMaps } from './dynamicRootTypes.mjs';
 import { getMapFilesEntry } from './mapFiles.mjs';
 
 //Helpers
@@ -14,9 +14,9 @@ import findLocalComponentPath from './findLocalComponentPath.mjs';
 //Helpers
 let currentPath;
 let needsHelpers = false;
-let needsDynamicTraitResolver = false;
 let needsConditionalRootType = false;
 let needsDynamicTypeComponent = false;
+let needsRenderWgts = false;
 
 const getRelativeImportPath = (currentPath, targetPath) => {
 	const currentParts = currentPath.split('/');
@@ -58,17 +58,13 @@ const getTraitImportPath = (currentPath, targetPath) => {
 export const initGenerateImports = ({ currentPath: _currentPath }) => {
 	currentPath = _currentPath;
 	needsHelpers = false;
-	needsDynamicTraitResolver = false;
 	needsConditionalRootType = false;
 	needsDynamicTypeComponent = false;
+	needsRenderWgts = false;
 };
 
 export const setNeedsHelpers = _needsHelpers => {
 	needsHelpers = _needsHelpers;
-};
-
-export const setNeedsDynamicTraitResolver = _needsDynamicTraitResolver => {
-	needsDynamicTraitResolver = _needsDynamicTraitResolver;
 };
 
 export const setNeedsConditionalRootType = _needsConditionalRootType => {
@@ -77,6 +73,10 @@ export const setNeedsConditionalRootType = _needsConditionalRootType => {
 
 export const setNeedsDynamicTypeComponent = _needsDynamicTypeComponent => {
 	needsDynamicTypeComponent = _needsDynamicTypeComponent;
+};
+
+export const setNeedsRenderWgts = _needsRenderWgts => {
+	needsRenderWgts = _needsRenderWgts;
 };
 
 const generateImports = () => {
@@ -152,10 +152,13 @@ const generateImports = () => {
 		res.push(`import { DynamicTypeComponent } from '${relativePath}';`);
 	}
 
-	if (needsDynamicTraitResolver) {
-		const relativePath = getRelativeImportPath(currentPath, 'dynamicTraits');
+	//A component whose own `wgts` is a dynamic traitPrps token renders that value through renderWgts,
+	// which handles both shapes it can take at runtime: already-transpiled React elements (rendered
+	// as-is) or raw Opus MDA built by a script/handler (run through wrapWidgets). See helpers.mjs.
+	if (needsRenderWgts) {
+		const relativePath = getRelativeImportPath(currentPath, 'renderWgts');
 
-		res.push(`import { resolveDynamicTrait } from '${relativePath}';`);
+		res.push(`import { renderWgts } from '${relativePath}';`);
 	}
 
 	getDynamicRootTypeComponentMaps().forEach(({ name, values }) => {
@@ -171,6 +174,17 @@ const generateImports = () => {
 	getTraitPathComponentMaps().forEach(({ name, entries }) => {
 		const mapEntries = entries
 			.map(({ value, type }) => `${JSON.stringify(value)}: ${type}`)
+			.join(', ');
+
+		res.push(`const ${name} = { ${mapEntries} };`);
+	});
+
+	//Path-keyed FUNCTIONAL-trait maps for dynamic trait sites. Values are lazy thunks so the imported
+	// trait binding is read when the trait is applied, not during this module's load — preventing a
+	// temporal-dead-zone ReferenceError when a referenced trait's module imports back into this file.
+	getDynamicTraitMaps().forEach(({ name, entries }) => {
+		const mapEntries = entries
+			.map(({ value, type }) => `${JSON.stringify(value)}: (prps) => ${type}(prps)`)
 			.join(', ');
 
 		res.push(`const ${name} = { ${mapEntries} };`);

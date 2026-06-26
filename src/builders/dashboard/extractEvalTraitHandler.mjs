@@ -1,3 +1,4 @@
+import { outputFolder } from '../../config.mjs';
 //Imports
 import { mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -138,7 +139,7 @@ ${transformedBody}
 export default ${handlerId};
 `;
 
-	const outputPath = join('output', 'src', importPath) + '.js';
+	const outputPath = join(outputFolder, 'src', importPath) + '.js';
 
 	mkdirSync(dirname(outputPath), { recursive: true });
 	writeFileSync(outputPath, handlerSource, 'utf8');

@@ -1,3 +1,4 @@
+import { outputFolder } from '../config.mjs';
 //Imports
 import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
 import { join, resolve, relative, extname } from 'path';
@@ -5,18 +6,18 @@ import { join, resolve, relative, extname } from 'path';
 //Helpers
 import { transformTraitReferences } from './scriptAction.mjs';
 
-//Final pass over the whole generated output: rewrite any remaining component-trait path string
-// (in MDA built anywhere — handlers, local components, and metadata nested under arbitrary keys such
-// as tabContents/tOpenTab) into a direct import of the transpiled React component. This is the
-// catch-all that guarantees no component reference is left to be resolved from JSON at runtime.
-// `transformTraitReferences` only converts COMPONENT traits (functional-trait strings and data-driven
-// {{...}} references are untouched) and is idempotent, so re-processing already-converted files is a
-// no-op.
+//Final pass over the whole generated output: rewrite any remaining trait path string (in MDA built
+// anywhere — handlers, local components, and metadata nested under arbitrary keys such as
+// tabContents/tOpenTab) into a direct import of the transpiled trait module. This is the catch-all
+// that guarantees no trait reference is left to be resolved from JSON at runtime.
+// `transformTraitReferences` converts both COMPONENT and FUNCTIONAL traits (spread/blueprint traits
+// and data-driven {{...}} references are untouched) and is idempotent, so re-processing already-
+// converted files is a no-op.
 const transformOutputTraitRefs = mapFiles => {
 	if (!mapFiles)
 		return;
 
-	const root = resolve('output', 'src');
+	const root = join(outputFolder, 'src');
 
 	const walk = dir => {
 		readdirSync(dir).forEach(name => {

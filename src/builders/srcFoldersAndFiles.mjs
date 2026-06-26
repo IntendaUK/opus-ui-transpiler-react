@@ -1,3 +1,4 @@
+import { outputFolder } from '../config.mjs';
 //Imports
 import { mkdirSync, existsSync, rmSync } from 'fs';
 import { join, resolve } from 'path';
@@ -9,7 +10,7 @@ import { sourceApplicationFolder } from '../config.mjs';
 const buildSrcFoldersAndFiles = async () => {
 	const checkPath = resolve(sourceApplicationFolder, 'src');
 
-	const targetPath = resolve('output', 'src');
+	const targetPath = join(outputFolder, 'src');
 
 	if (!existsSync(checkPath))
 		return;

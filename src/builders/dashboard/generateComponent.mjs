@@ -1,12 +1,17 @@
 //Getters / Setters
-import { setNeedsDynamicTraitResolver, setNeedsHelpers, setNeedsDynamicTypeComponent } from './generateImports.mjs';
+import { setNeedsHelpers, setNeedsDynamicTypeComponent, setNeedsRenderWgts } from './generateImports.mjs';
 import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
-import { getDynamicRootTypeInfo, registerDynamicRootTypeComponentMap } from './dynamicRootTypes.mjs';
+import {
+	getDynamicRootTypeInfo,
+	registerDynamicRootTypeComponentMap,
+	getDynamicTraitFlatCandidates
+} from './dynamicRootTypes.mjs';
 
 //Helpers
 import buildProps from './buildProps.mjs';
 import buildTraitsInfo from './buildTraitsInfo.mjs';
+import buildDynamicTraitMap from './buildDynamicTraitMap.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
 
@@ -41,12 +46,21 @@ const buildTraitApplication = trait => {
 		return `isConditionMet({${conditionString}}) ? ${expression} : null`;
 	};
 
+	//A dynamic trait reference resolves at runtime in one of two ways: it may ALREADY be a transpiled
+	// trait function (a handler/MDA built it as `{ trait: <importedFn> }` — the transpiler rewrites such
+	// functional-trait paths into direct imports), in which case it is called directly; otherwise it is
+	// a path string looked up in the per-file candidate map. The whole-app candidate set is used (not a
+	// field-scoped subset) so a string value sourced from anywhere still resolves.
+	const resolveRef = (refExpr, mapName) =>
+		`(typeof(${refExpr}) === 'function' ? ${refExpr} : ${mapName}[${refExpr}])`;
+
 	if (trait.isDynamicArray) {
-		setNeedsDynamicTraitResolver(true);
+		const mapName = buildDynamicTraitMap('array', getDynamicTraitFlatCandidates());
 
 		const mappedTraits = `(${trait.expression} ?? []).map(trait => {
-			const traitPath = trait.trait ?? trait;
-			return resolveDynamicTrait(traitPath)?.(trait.traitPrps ?? {});
+			const traitRef = trait.trait ?? trait;
+
+			return ${resolveRef('traitRef', mapName)}?.(trait.traitPrps ?? {});
 		})`;
 
 		if (trait.condition) {
@@ -62,9 +76,9 @@ const buildTraitApplication = trait => {
 	}
 
 	if (trait.isDynamic) {
-		setNeedsDynamicTraitResolver(true);
+		const mapName = buildDynamicTraitMap('array', getDynamicTraitFlatCandidates());
 
-		return wrapCondition(`resolveDynamicTrait(${trait.expression})?.(${buildFunctionalTraitPrps(trait.traitPrps)})`);
+		return wrapCondition(`${resolveRef(trait.expression, mapName)}?.(${buildFunctionalTraitPrps(trait.traitPrps)})`);
 	}
 
 	return wrapCondition(`${trait.type}(${buildFunctionalTraitPrps(trait.traitPrps)})`);
@@ -166,8 +180,19 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 	let children = [];
 	if (Array.isArray(wgts))
 		children = wgts.map(component => generateComponent(component, false, wgts.length === 1, options));
-	else if (typeof(wgts) === 'string' && wgts[0] === '$')
-		children = [`{${buildTraitPrpsAccessor(wgts.replaceAll('$', ''))}}`];
+	else if (typeof(wgts) === 'string' && wgts[0] === '$') {
+		//The component's own `wgts` is a dynamic token. Its runtime value can be EITHER pre-rendered
+		// React elements (a caller passed static Opus MDA the transpiler turned into JSX — e.g. a modal
+		// panel's `wgtsTop: <>…</>`) OR raw Opus MDA built by a script/handler (e.g. an object builder's
+		// field widgets, which are `{ id, traits }` objects React rejects as children). renderWgts
+		// decides at runtime: elements render as-is, raw MDA goes through wrapWidgets. A bare
+		// `{traitPrps.x}` child crashed on the raw-MDA case; blindly wrapping crashed on the JSX case.
+		const accessor = buildTraitPrpsAccessor(wgts.replaceAll('$', ''));
+
+		setNeedsRenderWgts(true);
+
+		children = [`{renderWgts(${accessor})}`];
+	}
 
 	let res;
 

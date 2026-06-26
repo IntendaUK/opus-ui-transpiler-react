@@ -4,19 +4,20 @@ import { join, resolve, dirname } from 'path';
 import { ESLint } from 'eslint';
 import { execSync } from 'child_process';
 
-import { sourceApplicationFolder, targetApplicationFolder, replaceMainJsx, replacePublicFolder, preservedSrcFolders } from './config.mjs';
+import { sourceApplicationFolder, targetApplicationFolder, outputFolder, replaceMainJsx, replacePublicFolder, preservedSrcFolders } from './config.mjs';
 
 import buildMain from './builders/main.mjs';
 import buildTheme from './builders/theme.mjs';
 import buildHelpers from './builders/helpers.mjs';
 import buildDashboard from './builders/dashboard.mjs';
-import buildDynamicTraits from './builders/dynamicTraits.mjs';
 import buildScriptAction from './builders/scriptAction.mjs';
 import buildSrcFoldersAndFiles from './builders/srcFoldersAndFiles.mjs';
 import transformOutputTraitRefs from './builders/transformOutputTraitRefs.mjs';
 import analyzeDynamicRootTypes from './builders/dashboard/analyzeDynamicRootTypes.mjs';
 import analyzeTraitPathFields from './builders/dashboard/analyzeTraitPathFields.mjs';
-import { initTraitPathFieldMaps } from './builders/dashboard/dynamicRootTypes.mjs';
+import analyzeDynamicTraitCandidates from './builders/dashboard/analyzeDynamicTraitCandidates.mjs';
+import { initTraitPathFieldMaps, initDynamicTraitCandidates } from './builders/dashboard/dynamicRootTypes.mjs';
+import { initMapFiles } from './builders/dashboard/mapFiles.mjs';
 
 let mdaPackage;
 const mapFiles = new Map();
@@ -24,7 +25,7 @@ const themeNames = [];
 let dynamicRootTypes = new Map();
 
 const setup = () => {
-	const outputPath = join(process.cwd(), 'output', 'src');
+	const outputPath = join(outputFolder, 'src');
 
 	if (existsSync(outputPath)) {
 		rmSync(outputPath, {
@@ -118,7 +119,6 @@ const createFiles = () => {
 	const { contents: { startup: startupPath } } = mapFiles.get('dashboard/index.json');
 
 	buildHelpers();
-	buildDynamicTraits(mapFiles);
 
 	mapFiles.delete('dashboard/contentsIndex.json');
 
@@ -156,7 +156,7 @@ const createEslint = () => {
 const runEslintOnOutput = async () => {
 	const eslint = createEslint();
 
-	const results = await eslint.lintFiles(['output/src/**/*.{js,jsx}']);
+	const results = await eslint.lintFiles([join(outputFolder, 'src')]);
 
 	await ESLint.outputFixes(results);
 
@@ -365,7 +365,7 @@ const copyStaticFiles = () => {
 	);
 
 	const cssDest = resolve(
-		'output',
+		outputFolder,
 		'src',
 		'transpiled.css'
 	);
@@ -382,7 +382,7 @@ const copyStaticFiles = () => {
 	);
 
 	const htmlDest = resolve(
-		'output',
+		outputFolder,
 		'index.html'
 	);
 
@@ -398,7 +398,7 @@ const copyStaticFiles = () => {
 	);
 
 	const publicDest = resolve(
-		'output',
+		outputFolder,
 		'public'
 	);
 
@@ -409,7 +409,7 @@ const copyStaticFiles = () => {
 	);
 
 	const appDest = resolve(
-		'output',
+		outputFolder,
 		'app'
 	);
 
@@ -423,13 +423,13 @@ const copyStaticFiles = () => {
 		copyFolderContentsRecursive(appSrc, appDest, { deleteExtra: true });
 
 		const appDashboardDest = resolve(
-			'output',
+			outputFolder,
 			'app',
 			'dashboard'
 		);
 
 		const appBlueprintDest = resolve(
-			'output',
+			outputFolder,
 			'app',
 			'blueprint'
 		);
@@ -452,7 +452,7 @@ const copyStaticFiles = () => {
 };
 
 function copyCrossPlatform () {
-	const outRoot = resolve('output');
+	const outRoot = resolve(outputFolder);
 	const destRoot = resolve(targetApplicationFolder);
 
 	const srcSrc = resolve(outRoot, 'src');
@@ -521,8 +521,14 @@ loadMdaPackage();
 console.log('Building Files Map');
 buildFileSet(mdaPackage);
 
+//Trait classification during candidate discovery (isFunctionalTrait -> identifyMainTrait) reads the
+// shared map-files registry, so initialise it before the analysis passes run (it is re-set per file
+// later during transpilation).
+initMapFiles(mapFiles);
+
 dynamicRootTypes = analyzeDynamicRootTypes(mapFiles);
 initTraitPathFieldMaps(analyzeTraitPathFields(mapFiles));
+initDynamicTraitCandidates(analyzeDynamicTraitCandidates(mapFiles));
 
 console.log('Loading Custom Code');
 await buildSrcFoldersAndFiles();

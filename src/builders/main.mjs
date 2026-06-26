@@ -1,3 +1,4 @@
+import { outputFolder } from '../config.mjs';
 //Imports
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
@@ -153,7 +154,7 @@ const buildMain = ({ startupPath, themeNames }) => {
 	if (shouldUseOriginalMain(originalMain))
 		useTemplate = templatifyOriginalMain(originalMain);
 
-	const outputPath = join('output', 'src', 'main.jsx');
+	const outputPath = join(outputFolder, 'src', 'main.jsx');
 
 	mkdirSync(dirname(outputPath), { recursive: true });
 
