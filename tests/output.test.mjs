@@ -3717,6 +3717,46 @@ test('trait-list prop string elements are converted to direct trait-module impor
 	assert.doesNotMatch(output, /traits:\s*\[\{\s*trait:\s*["']@menu\/tree\/functional\/setBg["']/);
 });
 
+test('a functional trait colliding with its .js script handler imports the .jsx wrapper', () => {
+	//Regression: a FUNCTIONAL trait emitted from a `.js` script handler produces TWO output files at the
+	// same base path — `setBg.js` (the raw action handler the action pipeline calls with
+	// `{ config, getState, … }`) and `setBg.jsx` (the trait wrapper that returns the trait's config).
+	// Every trait reference is applied via applyTraits' `type(traitPrps)`, so it must import the `.jsx`
+	// wrapper: an extension-less import resolves to the `.js` handler (bundlers resolve `.js` before
+	// `.jsx`), which then crashes when called as a trait (its destructured `config` is undefined — the
+	// real-world Ctrl-K searchOverlay crash). The scriptAction-typed mapFiles entry (registered by the
+	// build WITHOUT the `dashboard/` prefix) marks the collision; non-colliding traits stay extensionless.
+	const mapFiles = new Map([
+		['dashboard/@search/functional/setBg.json', { contents: { prps: { scps: [] } } }],
+		['@search/functional/setBg', { contents: 'const setBg = () => {};', type: 'scriptAction' }],
+		['dashboard/@search/functional/noCollision.json', { contents: { prps: { scps: [] } } }]
+	]);
+
+	const currentPath = 'dashboard/@search/functional/getData';
+
+	const input = [
+		'const buildRows = () => {',
+		'\tconst traits = [];',
+		"\ttraits.push({ trait: '@search/functional/setBg' });",
+		"\ttraits.push({ trait: '@search/functional/noCollision' });",
+		'\treturn traits;',
+		'};'
+	].join('\n');
+
+	const output = transformTraitReferences(input, currentPath, mapFiles);
+
+	//The colliding functional trait imports the .jsx wrapper, NOT the bare (.js-resolving) path...
+	assert.match(output, /import SearchFunctionalSetBg from ['"]\.\/setBg\.jsx['"];/);
+	assert.doesNotMatch(output, /import SearchFunctionalSetBg from ['"]\.\/setBg['"];/);
+	//...and is referenced as the bare identifier (no longer a path string).
+	assert.match(output, /trait:\s*SearchFunctionalSetBg\b/);
+	assert.doesNotMatch(output, /trait:\s*["']@search\/functional\/setBg["']/);
+
+	//A functional trait with no `.js` handler collision keeps the extension-less import (its only output
+	// file is the `.jsx`, so there is nothing to disambiguate against).
+	assert.match(output, /import SearchFunctionalNoCollision from ['"]\.\/noCollision['"];/);
+});
+
 test('bare path-string elements of a plain `traits` action-spread array are converted to direct imports', () => {
 	//Inside scps/actions, traits are spread via the plain `traits` key (no CamelCase suffix), holding
 	// bare path strings: `{ traits: ["@.../setDateString"] }`. These are NOT trait-list props

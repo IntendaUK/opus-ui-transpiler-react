@@ -217,7 +217,22 @@ export const transformTraitReferences = (contents, currentPath, mapFiles) => {
 	//Register an import for a resolved trait key and return the local identifier to reference it by.
 	const addImport = key => {
 		const identifier = pathToIdentifier(key);
-		const importPath = getRelativeImportPath(currentPath, key.replace(/\.json$/, ''));
+		const targetPath = key.replace(/\.json$/, '');
+
+		let importPath = getRelativeImportPath(currentPath, targetPath);
+
+		//A FUNCTIONAL trait emitted from a `.js` script handler ALSO produces a `.jsx` trait wrapper at the
+		// same base path: the `.js` is the raw action handler (called by the action pipeline with
+		// `{ config, getState, … }`), the `.jsx` is the trait form that returns the trait's config. Every
+		// site that references a trait calls it as a trait builder (applyTraits' `type(traitPrps)`), which
+		// the raw handler is not — calling it crashes (e.g. `config` is undefined). The extension-less
+		// import resolves to the `.js` handler (Vite resolves `.js` before `.jsx`), so a colliding trait
+		// must target the `.jsx` wrapper explicitly. Mirrors generateImports' getTraitImportPath, keyed off
+		// the scriptAction-typed mapFiles entry that marks the `.js`/`.jsx` collision.
+		const collisionEntry = mapFiles.get(targetPath) ?? mapFiles.get(targetPath.replace(/^dashboard\//, ''));
+
+		if (collisionEntry?.type === 'scriptAction')
+			importPath = `${importPath}.jsx`;
 
 		imports.set(identifier, importPath);
 
