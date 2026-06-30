@@ -1,3 +1,5 @@
+import { CONFIG_TRAIT_IMPORT_FIELDS } from './configTraitImportFields.mjs';
+
 let currentPath;
 let dynamicRootTypes;
 let componentMaps = [];
@@ -113,7 +115,13 @@ export const initDynamicTraitCandidates = ({ fieldCandidates, flatCandidates, no
 	dynamicTraitNonNarrowableFields = nonNarrowableFields ?? new Set();
 };
 
-export const getDynamicTraitFieldCandidates = field => dynamicTraitFieldCandidates.get(field) ?? [];
+//Config-trait fields (traitDataManager etc.) have their literal-path values converted to direct imports
+// at the use site (scriptAction Pass 1b), so the consuming component never resolves a string through a
+// candidate map. Return no candidates for them — the emitted `dynamicTraitMap_<field>` becomes an empty
+// `{}` (name preserved so the consumer's reference still resolves; no leaked candidate imports), and the
+// large whole-app map is gone.
+export const getDynamicTraitFieldCandidates = field =>
+	CONFIG_TRAIT_IMPORT_FIELDS.has(field) ? [] : (dynamicTraitFieldCandidates.get(field) ?? []);
 
 export const getDynamicTraitFlatCandidates = () => dynamicTraitFlatCandidates;
 

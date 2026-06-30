@@ -7,6 +7,7 @@ import { dirname, join } from 'path';
 import pathToIdentifier from './pathToIdentifier.mjs';
 import identifyMainTrait from './dashboard/identifyMainTrait.mjs';
 import { initMapFiles } from './dashboard/mapFiles.mjs';
+import { CONFIG_TRAIT_IMPORT_FIELDS } from './dashboard/configTraitImportFields.mjs';
 
 //A trait file is a component-trait (renders to a React component) when it declares its own type, or
 // resolves to one through a main trait. Guarded: any resolution hiccup falls back to "not a
@@ -106,6 +107,16 @@ export const resolveTraitKey = (traitPath, currentPath) => {
 // does not match here and is handled by the dynamic-template pass below. Capture groups: key-quote,
 // colon, value-quote, path. Only paths beginning with @, ./ or ../ are considered.
 const TRAIT_REFERENCE_REGEX = /(["']?)trait\1(\s*:\s*)(["'`])((?:@|\.\.?\/)[^"'`$]+)\3/g;
+
+//Matches a CONFIG-trait field (traitDataManager / traitModifiedRecordsManager / traitReorderedRecordsManager)
+// whose value is a static trait path. These fields are passed to a shared component (e.g. the grid) which
+// calls the value as a config function, so a literal path here is resolved through that component's
+// whole-app candidate map at runtime. Converting it to a direct import (see Pass 1b) removes the need for
+// that map. Capture groups mirror TRAIT_REFERENCE_REGEX: key-quote, key, colon, value-quote, path.
+const CONFIG_TRAIT_FIELD_REGEX = new RegExp(
+	`(["']?)(${[...CONFIG_TRAIT_IMPORT_FIELDS].join('|')})\\1(\\s*:\\s*)(["'\`])((?:@|\\.\\.?\\/)[^"'\`$]+)\\4`,
+	'g'
+);
 
 //Matches a trait-list prop (e.g. `traitsTreeNode: [ ... ]`) whose value is an array literal. By Opus
 // convention these props are named `traits<Suffix>` (plural "traits" + CamelCase) and hold bare
@@ -231,6 +242,33 @@ export const transformTraitReferences = (contents, currentPath, mapFiles) => {
 				return match;
 
 			return `${keyQuote}trait${keyQuote}${colon}${addImport(key)}`;
+		}
+	);
+
+	//Pass 1b: CONFIG-trait fields (traitDataManager etc.) whose value is a static trait path. The shared
+	// consumer calls the value as a config function (`traitPrps.traitDataManager?.(prps)`), so convert the
+	// path to a direct import — `<Import>.traitConfig` for a component trait (the consumer needs the config
+	// closure, not the rendered component) or the bare `<Import>` for a functional trait. This is what lets
+	// the consumer's whole-app candidate map be suppressed (getDynamicTraitFieldCandidates). Runs file-wide,
+	// so it covers both plain traitPrps and the same fields nested inside scps/handler MDA. Forwarding tokens
+	// (`%field%`/`$field$`) have no quote+path value, so they never match and stay as accessors. Idempotent:
+	// a converted value (`field: Ident.traitConfig`) has no quoted path to re-match.
+	transformed = transformed.replace(
+		CONFIG_TRAIT_FIELD_REGEX,
+		(match, keyQuote, key, colon, valueQuote, traitPath) => {
+			const traitKey = resolveTraitKey(traitPath, currentPath);
+
+			if (!traitKey)
+				return match;
+
+			const entry = mapFiles.get(traitKey);
+
+			if (!entry || !isConvertibleTrait(entry.contents))
+				return match;
+
+			const suffix = isComponentTrait(entry.contents) ? '.traitConfig' : '';
+
+			return `${keyQuote}${key}${keyQuote}${colon}${addImport(traitKey)}${suffix}`;
 		}
 	);
 

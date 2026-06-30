@@ -10,6 +10,7 @@ import { transformTraitReferences } from '../src/builders/scriptAction.mjs';
 import { rewriteReaderFile } from '../src/builders/resolveDataFedTraitFields.mjs';
 import generateTraitOnMount from '../src/builders/dashboard/generateTraitOnMount.mjs';
 import normalizeTraits from '../src/builders/dashboard/normalizeTraits.mjs';
+import { getDynamicTraitFieldCandidates, initDynamicTraitCandidates } from '../src/builders/dashboard/dynamicRootTypes.mjs';
 
 //The transpiler stages output per-target under output/<targetBasename> so concurrent/back-to-back
 // transpiles into different targets never share files (avoids Windows file-handle contention).
@@ -2454,7 +2455,7 @@ test('context-menu wgts passed as trait props lift their component trait to a ty
 	assert.doesNotMatch(contextMenu, /trait:\s*["']traits\/menu\/menuAction["']/);
 });
 
-test('a component trait used as a config-trait prop (traitDataManager) is discovered and its map entry uses .traitConfig', () => {
+test('a component trait used as a config-trait prop (traitDataManager) is converted to a direct .traitConfig import, and its candidate map is emptied', () => {
 	const sourceApp = createConfigTraitDataManagerSourceApp();
 	const targetApp = join(tmpRoot, 'target-app-config-trait-data-manager');
 
@@ -2473,21 +2474,25 @@ test('a component trait used as a config-trait prop (traitDataManager) is discov
 		});
 	});
 
-	//The consumer grid trait emits the per-file dynamic-trait map (it has a %traitDataManager% site,
-	// field-keyed on `traitDataManager`).
+	//The consumer grid trait both USES a dataManager (a `traitDataManager` config-trait prop) and is the
+	// shared component carrying the field-keyed `traitDataManager` site.
 	const consumer = readFileSync(
 		join(targetApp, 'src', 'dashboard', 'traits', 'grid', 'orderGrid.jsx'),
 		'utf8'
 	);
 
-	//The COMPONENT dataManager trait — referenced as a `traitDataManager` config-trait prop — is
-	// discovered despite not being a functional trait, so its path appears as a KEY in the field-scoped
-	// map for `traitDataManager`...
-	assert.match(consumer, /dynamicTraitMap_traitDataManager\s*=\s*\{[\s\S]*["']@grids\/orderGrid\/gridDataManager\/index["']/);
+	//`traitDataManager` is a config-trait field: its literal use-site path is converted to a DIRECT
+	// import, called via `.traitConfig` (the config closure the consumer invokes) because it's a
+	// component trait. The reference now lives with the caller — not as a string resolved at runtime.
+	assert.match(consumer, /import GridsOrderGridGridDataManagerIndex from ['"][^'"]*@grids\/orderGrid\/gridDataManager\/index['"];/);
+	assert.match(consumer, /traitDataManager:\s*GridsOrderGridGridDataManagerIndex\.traitConfig/);
 
-	//...and because it is a component trait used for its CONFIG, the entry calls `.traitConfig(prps)`
-	// (the config object) rather than the bare component (which would return JSX and corrupt the merge).
-	assert.match(consumer, /["']@grids\/orderGrid\/gridDataManager\/index["']:\s*\(prps\)\s*=>\s*\w+\.traitConfig\(prps\)/);
+	//The bare path string is gone — neither a use-site value nor a map key.
+	assert.doesNotMatch(consumer, /["']@grids\/orderGrid\/gridDataManager\/index["']/);
+
+	//And the field's whole-app candidate map is emitted EMPTY (name preserved so the consumer's
+	// `dynamicTraitMap_traitDataManager[...]` reference still resolves; the huge map is gone).
+	assert.match(consumer, /dynamicTraitMap_traitDataManager\s*=\s*\{\s*\}/);
 
 	//The dataManager's own generated module exposes the config form so the map entry can call it.
 	const dataManager = readFileSync(
@@ -3989,6 +3994,47 @@ test('data-fed trait-field pass scopes a site to an explicit verified value list
 	assert.match(contents, /dynamicTraitMap_array\[traitRef\]/);
 });
 
+test('data-fed trait-field pass prunes orphaned imports even when concatenated on one line (pre-prettier form)', () => {
+	const root = createDataFedOutputTree();
+	const readerKey = 'dashboard/@x/reader/index';
+
+	//generateImports emits trait imports concatenated (res.join('')), and this pass runs BEFORE prettier
+	// splits them onto separate lines. So at prune time all the orphaned whole-app imports sit on ONE line.
+	// The prune must still remove them — and must leave `import React, { … }` (no bare `Ident from`) alone.
+	const readerContents = [
+		'import XOtherFuncTrait from "../other/funcTrait";import XMenuA from "../contextMenu/menuA";import React, { useMemo } from "react";',
+		'const dynamicTraitMap_array = {',
+		'  "@x/other/funcTrait": (prps) => XOtherFuncTrait(prps),',
+		'  "@x/contextMenu/menuA": (prps) => XMenuA(prps),',
+		'};',
+		'const C = ({ traitPrps }) => {',
+		'  useMemo(() => {}, []);',
+		'  return (traitPrps.traits ?? []).map((trait) => {',
+		'    const traitRef = trait.trait ?? trait;',
+		'    return (typeof traitRef === "function" ? traitRef : dynamicTraitMap_array[traitRef])?.({});',
+		'  });',
+		'};',
+		'export default C;'
+	].join('\n');
+
+	const { contents, entries, residual } = rewriteReaderFile(readerContents, readerKey, root, {
+		values: ['@x/contextMenu/menuA']
+	});
+
+	assert.strictEqual(residual.length, 0);
+	assert.strictEqual(entries, 1);
+
+	//The orphaned import — concatenated on the same line as the others — is removed...
+	assert.doesNotMatch(contents, /import XOtherFuncTrait\b/);
+	assert.doesNotMatch(contents, /@x\/other\/funcTrait/);
+
+	//...the still-needed scoped import survives (under its canonical identifier), the scoped map keeps it,
+	// and the `import React, { useMemo }` form is untouched.
+	assert.match(contents, /import \w+ from ["']\.\.\/contextMenu\/menuA["'];/);
+	assert.match(contents, /"@x\/contextMenu\/menuA": \(prps\) => \w+\(prps\)/);
+	assert.match(contents, /import React, \{ useMemo \} from "react";/);
+});
+
 // --- Grid cell-trait fields: function-preserving normalization + component-trait rendering ---
 
 //The recognized cell-trait normalization morph (mirrors l2_grid columnCellNoEdit's innerTraits):
@@ -4188,4 +4234,60 @@ test('normalizeTraits keeps a singular trait flat inside cell trait-ref-list fie
 	//A wgts entry IS a node — the singular trait is still normalized into a traits array.
 	assert.equal(node.wgts[0].trait, undefined);
 	assert.equal(node.wgts[0].traits[0].trait, '@x/someWidgetTrait');
+});
+
+// --- Config-trait fields: convert use-site paths to direct imports + suppress the whole-app map ---
+
+test('config-trait field paths convert to direct imports (.traitConfig for component traits), leaving tokens/other keys alone', () => {
+	const mapFiles = new Map([
+		//A component-trait dataManager (declares a type → consumer needs its .traitConfig closure).
+		['dashboard/@grids/roles/dataManager.json', { contents: { type: 'container', acceptPrps: { columnConfig: 'object' } } }],
+		//A functional-trait manager (no own type → the module IS the config function).
+		['dashboard/@grids/funcManager.json', { contents: { prps: { flows: [] } } }]
+	]);
+
+	const currentPath = 'dashboard/@somePage/index';
+
+	const input = [
+		'const prps = {',
+		'  traitDataManager: "@grids/roles/dataManager",',
+		'  traitModifiedRecordsManager: "@grids/funcManager",',
+		'  traitReorderedRecordsManager: traitPrps.traitReorderedRecordsManager,',
+		'  someOtherField: "@grids/roles/dataManager"',
+		'};'
+	].join('\n');
+
+	const output = transformTraitReferences(input, currentPath, mapFiles);
+
+	//Component-trait dataManager → direct import called via .traitConfig (what the consumer invokes).
+	assert.match(output, /import GridsRolesDataManager from ['"][^'"]*@grids\/roles\/dataManager['"];/);
+	assert.match(output, /traitDataManager:\s*GridsRolesDataManager\.traitConfig/);
+	assert.doesNotMatch(output, /traitDataManager:\s*["']@grids/);
+
+	//Functional-trait manager → bare import, no .traitConfig.
+	assert.match(output, /traitModifiedRecordsManager:\s*GridsFuncManager,/);
+	assert.doesNotMatch(output, /traitModifiedRecordsManager:\s*\w+\.traitConfig/);
+
+	//A forwarding accessor (a wrapper passing its own prop down) is left untouched.
+	assert.match(output, /traitReorderedRecordsManager:\s*traitPrps\.traitReorderedRecordsManager/);
+
+	//The SAME path under a non-config key is NOT a config-trait field — left as a string.
+	assert.match(output, /someOtherField:\s*["']@grids\/roles\/dataManager["']/);
+});
+
+test('getDynamicTraitFieldCandidates returns no candidates for config-trait-import fields (empties their maps)', () => {
+	initDynamicTraitCandidates({
+		fieldCandidates: new Map([
+			['traitDataManager', [{ value: '@x/dm', path: 'dashboard/@x/dm.json', type: 'XDm', isComponentTrait: true }]],
+			['someField', [{ value: '@x/y', path: 'dashboard/@x/y.json', type: 'XY', isComponentTrait: false }]]
+		])
+	});
+
+	//Config-trait fields are converted to imports at the use site, so their candidate maps are emptied.
+	assert.deepEqual(getDynamicTraitFieldCandidates('traitDataManager'), []);
+	assert.deepEqual(getDynamicTraitFieldCandidates('traitModifiedRecordsManager'), []);
+	assert.deepEqual(getDynamicTraitFieldCandidates('traitReorderedRecordsManager'), []);
+
+	//A normal dynamic-trait field is unaffected.
+	assert.equal(getDynamicTraitFieldCandidates('someField').length, 1);
 });

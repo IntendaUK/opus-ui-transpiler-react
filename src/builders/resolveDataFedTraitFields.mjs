@@ -268,7 +268,13 @@ const rewriteReaderFile = (contents, fileKey, root, { segments, values: explicit
 
 	//Drop existing trait-map import lines whose identifier is no longer referenced anywhere outside its
 	// own import (these are the imports the 2370-entry flat map alone pulled in), then add any missing ones.
-	const importLineRegex = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+["'][^"']+["'];\s*$/gm;
+	// NOT line-anchored: this pass runs BEFORE the ESLint/prettier format step, and generateImports emits
+	// the trait imports concatenated (`res.join('')`) — so all ~2370 are on a single line at this point. An
+	// `^…$` (per-line) regex matched none of them, leaving every orphaned import in the output (prettier then
+	// split them one-per-line). Matching `import <Ident> from "…";` anywhere catches both forms. It stays
+	// specific to single DEFAULT imports, so `import { X } from …` and `import React, { … } from …` (no bare
+	// `<Ident> from`) are never touched.
+	const importLineRegex = /import\s+([A-Za-z_$][\w$]*)\s+from\s+["'][^"']+["'];/g;
 	const isReferencedElsewhere = (id, text) => {
 		const refs = text.match(new RegExp(`\\b${id}\\b`, 'g')) || [];
 
