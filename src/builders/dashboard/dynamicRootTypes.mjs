@@ -13,6 +13,7 @@ let dynamicTraitMapNamesByKey = {};
 // used to emit per-file direct-import maps in place of the old global resolveDynamicTrait registry.
 let dynamicTraitFieldCandidates = new Map();
 let dynamicTraitFlatCandidates = [];
+let dynamicTraitNonNarrowableFields = new Set();
 
 export const initDynamicRootTypes = ({
 	currentPath: _currentPath,
@@ -106,11 +107,21 @@ export const registerDynamicTraitMap = (key, entries) => {
 export const getDynamicTraitMaps = () => registeredDynamicTraitMaps;
 
 //Discovered (whole-app) functional-trait candidates for dynamic trait sites. Initialised once per run.
-export const initDynamicTraitCandidates = ({ fieldCandidates, flatCandidates } = {}) => {
+export const initDynamicTraitCandidates = ({ fieldCandidates, flatCandidates, nonNarrowableFields } = {}) => {
 	dynamicTraitFieldCandidates = fieldCandidates ?? new Map();
 	dynamicTraitFlatCandidates = flatCandidates ?? [];
+	dynamicTraitNonNarrowableFields = nonNarrowableFields ?? new Set();
 };
 
 export const getDynamicTraitFieldCandidates = field => dynamicTraitFieldCandidates.get(field) ?? [];
 
 export const getDynamicTraitFlatCandidates = () => dynamicTraitFlatCandidates;
+
+//A field-keyed dynamic-trait site may use a field-scoped candidate subset ONLY if the field is
+// narrowable — i.e. every value it can hold was statically discovered (literal trait paths plus any
+// theme-resolved defaults). A field is reported narrowable only when it (a) was NOT flagged as carrying
+// an unknown runtime value and (b) is actually a known field (has discovered candidates). A field with
+// candidates but no token/opaque default is the narrowable case; a field with zero candidates is left
+// to the caller to decide (an array site with only object elements is safe with an empty map).
+export const getDynamicTraitFieldNarrowable = field =>
+	!dynamicTraitNonNarrowableFields.has(field);

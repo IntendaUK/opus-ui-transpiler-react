@@ -13,6 +13,7 @@ import buildDashboard from './builders/dashboard.mjs';
 import buildScriptAction from './builders/scriptAction.mjs';
 import buildSrcFoldersAndFiles from './builders/srcFoldersAndFiles.mjs';
 import transformOutputTraitRefs from './builders/transformOutputTraitRefs.mjs';
+import resolveDataFedTraitFields from './builders/resolveDataFedTraitFields.mjs';
 import analyzeDynamicRootTypes from './builders/dashboard/analyzeDynamicRootTypes.mjs';
 import analyzeTraitPathFields from './builders/dashboard/analyzeTraitPathFields.mjs';
 import analyzeDynamicTraitCandidates from './builders/dashboard/analyzeDynamicTraitCandidates.mjs';
@@ -538,6 +539,9 @@ createFiles();
 
 console.log('Resolving Component-Trait References');
 transformOutputTraitRefs(mapFiles);
+
+console.log('Resolving Data-Fed Trait Fields');
+resolveDataFedTraitFields();
 
 console.log('Copying Static Files');
 copyStaticFiles();

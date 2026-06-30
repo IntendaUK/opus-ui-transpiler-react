@@ -153,13 +153,10 @@ const generateImports = () => {
 	}
 
 	//A component whose own `wgts` is a dynamic traitPrps token renders that value through renderWgts,
-	// which handles both shapes it can take at runtime: already-transpiled React elements (rendered
-	// as-is) or raw Opus MDA built by a script/handler (run through wrapWidgets). See helpers.mjs.
-	if (needsRenderWgts) {
-		const relativePath = getRelativeImportPath(currentPath, 'renderWgts');
-
-		res.push(`import { renderWgts } from '${relativePath}';`);
-	}
+	// the shared opus-ui helper. It handles both shapes the value can take at runtime: already-transpiled
+	// React elements (rendered as-is) or raw Opus MDA built by a script/handler (run through wrapWidgets).
+	if (needsRenderWgts)
+		res.push("import { renderWgts } from '@intenda/opus-ui';");
 
 	getDynamicRootTypeComponentMaps().forEach(({ name, values }) => {
 		const entries = values
@@ -184,7 +181,14 @@ const generateImports = () => {
 	// temporal-dead-zone ReferenceError when a referenced trait's module imports back into this file.
 	getDynamicTraitMaps().forEach(({ name, entries }) => {
 		const mapEntries = entries
-			.map(({ value, type }) => `${JSON.stringify(value)}: (prps) => ${type}(prps)`)
+			.map(({ value, type, isComponentTrait }) =>
+				//A COMPONENT trait used as a CONFIG trait (e.g. a grid's `traitDataManager`) must contribute
+				// its CONFIG, not its JSX — so call the module's `.traitConfig(prps)` closure. A functional
+				// trait's module IS the config function, so call it directly.
+				isComponentTrait
+					? `${JSON.stringify(value)}: (prps) => ${type}.traitConfig(prps)`
+					: `${JSON.stringify(value)}: (prps) => ${type}(prps)`
+			)
 			.join(', ');
 
 		res.push(`const ${name} = { ${mapEntries} };`);

@@ -393,7 +393,22 @@ const buildProps = ({
 			if (traitsInfo.otherTraits.length) {
 				const otherTraitsString = traitsInfo.otherTraits
 					.map(({ type, traitPrps, condition }) => {
-						const entry = `{ type: ${type}, traitPrps: ${JSON.stringify(traitPrps)} }`;
+						//Build the nested trait's props through buildProps (not raw JSON.stringify) so data
+						// tokens ($rowData$, %x%, …) inside them are rewritten to traitPrps accessors against
+						// the enclosing functional trait. Raw JSON left the tokens as literal strings; the
+						// functional-trait runtime never resolves those (only the JSON path's
+						// recursivelyApplyValuePrps does), so e.g. a context-menu action trait received the
+						// literal "$rowData$" instead of the row record.
+						//
+						// Note: isInRowMda is deliberately NOT propagated here. Token rewriting (buildProps'
+						// `$…$`/`%…%` handling) is independent of it, while isInRowMda would additionally lift
+						// nested `type`/`traits` metadata inside these props into imported components — these
+						// props are data the trait renders at runtime, so they must stay as raw metadata.
+						const traitPrpsString = buildProps({
+							prps: traitPrps,
+							wrap: false
+						});
+						const entry = `{ type: ${type}, traitPrps: {${traitPrpsString}} }`;
 
 						//A functional trait can be guarded by a `condition` (e.g. virtualizeColumn, applied
 						// only when `$virtualize$` is truthy). The runtime applyNodeTraits/applyTraits apply

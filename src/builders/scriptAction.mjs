@@ -117,6 +117,16 @@ const TRAIT_LIST_PROP_REGEX = /(["']?)(traits[A-Z]\w*)\1(\s*:\s*)\[([\s\S]*?)\]/
 //Matches a single quoted ensemble/relative trait path (the elements inside a trait-list array).
 const TRAIT_PATH_STRING_REGEX = /(["'])((?:@|\.\.?\/)[^"']+)\1/g;
 
+//As above but accepts ANY quote style — including backticks, which hand-written / morph-built
+// components use for their trait-path strings (e.g. a `setVariable` base-trait array). `$` is excluded
+// from the path so interpolated templates (handled by the dynamic-template pass) never match.
+const TRAIT_PATH_STRING_ANY_QUOTE_REGEX = /(["'`])((?:@|\.\.?\/)[^"'`$]+)\1/g;
+
+//Matches an array literal whose elements are ALL trait-path strings (single quote style), e.g. a
+// script's `value: [`@…/onValueChanged`, `@…/setErrorStyles`]` base-trait list. Requiring every element
+// to be a trait path means mixed/data arrays never match, so converting in place is safe anywhere.
+const PURE_TRAIT_PATH_ARRAY_REGEX = /\[\s*(?:(["'`])(?:@|\.\.?\/)[^"'`$]+\1\s*,?\s*)+\]/g;
+
 //Matches a trait-list prop declared as a PROP SPEC with a default array, e.g.
 //   traitsUnionDOFields: { type: "array", dft: () => ["@…/index"] }
 // The trait paths live in the `dft` default (optionally a `() =>` thunk), not in a bare array literal
@@ -124,6 +134,48 @@ const TRAIT_PATH_STRING_REGEX = /(["'])((?:@|\.\.?\/)[^"']+)\1/g;
 // including the default array's opening `[`, (2) the array body, (3) the closing `]` — so the body's
 // path strings can be converted IN PLACE while the surrounding prop-spec structure is preserved.
 const TRAIT_PROP_DEFAULT_REGEX = /(traits[A-Z]\w*\s*:\s*\{[\s\S]*?dft\s*:\s*(?:\([^)]*\)\s*=>\s*)?\[)([\s\S]*?)(\])/g;
+
+//Matches the OPENING of a plain `traits` array — the action-spread form used inside scps/actions, e.g.
+//   actions: [{ traits: ["@l2_date_picker/.../setDateString"] }]
+// Unlike the `traits[A-Z]` props above, the key is exactly `traits` (no CamelCase suffix), so Pass 2's
+// regex never matches it and its bare path-string elements stay unconverted. The lookbehind excludes
+// keys that merely END in `traits` (e.g. `someTraits`); the match deliberately stops at the opening
+// `[` because these arrays can contain nested objects/arrays, so the matching `]` is found by a
+// bracket-depth scan rather than a (truncating) non-greedy regex.
+const PLAIN_TRAITS_ARRAY_OPENER_REGEX = /(?<![\w$])(["']?)traits\1\s*:\s*\[/g;
+
+//Find the index of the `]` that closes the array opened at `openBracketIndex` (the index of its `[`),
+// tracking bracket depth and skipping over string-literal contents (so brackets inside strings don't
+// count). Returns -1 if the array is unbalanced (in which case the caller leaves it untouched).
+const findMatchingBracket = (source, openBracketIndex) => {
+	let depth = 1;
+	let stringDelimiter = null;
+
+	for (let i = openBracketIndex + 1; i < source.length; i++) {
+		const ch = source[i];
+
+		if (stringDelimiter) {
+			if (ch === '\\') {
+				i++;
+				continue;
+			}
+
+			if (ch === stringDelimiter)
+				stringDelimiter = null;
+
+			continue;
+		}
+
+		if (ch === '"' || ch === '\'' || ch === '`')
+			stringDelimiter = ch;
+		else if (ch === '[')
+			depth++;
+		else if (ch === ']' && --depth === 0)
+			return i;
+	}
+
+	return -1;
+};
 
 //Matches a `trait` reference whose value is an INTERPOLATED template literal, e.g.
 //   trait: `@l2_buttons/visual/${type}/index`
@@ -228,6 +280,70 @@ export const transformTraitReferences = (contents, currentPath, mapFiles) => {
 
 			return `${prefix}${convertedBody}${suffix}`;
 		}
+	);
+
+	//Pass 2c: plain `traits` arrays (the action-spread form inside scps/actions, e.g.
+	//   { traits: ["@l2_date_picker/.../setDateString"] }
+	// ). Each bare path-string element that resolves to a transpiled trait module is converted to a
+	// direct import, so the runtime applies the imported (functional) trait instead of resolving the
+	// string from app.json — which the self-contained app no longer ships. Object elements
+	// (`{ trait: "path" }`) inside these arrays were already handled by Pass 1, and tokens / unresolved
+	// paths are left untouched by the inner regex. The array extent is found by a bracket-depth scan
+	// (these arrays may hold nested objects/arrays), and conversion is gated on isConvertibleTrait so
+	// incidental path-like strings in nested `traitPrps` are not mistaken for trait references.
+	const convertTraitPathString = (stringMatch, valueQuote, traitPath) => {
+		const traitKey = resolveTraitKey(traitPath, currentPath);
+
+		if (!traitKey)
+			return stringMatch;
+
+		const entry = mapFiles.get(traitKey);
+
+		if (!entry || !isConvertibleTrait(entry.contents))
+			return stringMatch;
+
+		return addImport(traitKey);
+	};
+
+	let plainTraitsResult = '';
+	let plainTraitsCursor = 0;
+	let opener;
+
+	PLAIN_TRAITS_ARRAY_OPENER_REGEX.lastIndex = 0;
+
+	while ((opener = PLAIN_TRAITS_ARRAY_OPENER_REGEX.exec(transformed))) {
+		const openBracketIndex = opener.index + opener[0].length - 1;
+		const closeBracketIndex = findMatchingBracket(transformed, openBracketIndex);
+
+		//Unbalanced (shouldn't happen for valid output) — leave this occurrence untouched and continue.
+		if (closeBracketIndex === -1)
+			continue;
+
+		const body = transformed.slice(openBracketIndex + 1, closeBracketIndex);
+		const convertedBody = body.replace(TRAIT_PATH_STRING_REGEX, convertTraitPathString);
+
+		plainTraitsResult += transformed.slice(plainTraitsCursor, openBracketIndex + 1) + convertedBody;
+		plainTraitsCursor = closeBracketIndex;
+
+		//Resume scanning after this array (its body's nested path strings are already converted above).
+		PLAIN_TRAITS_ARRAY_OPENER_REGEX.lastIndex = closeBracketIndex;
+	}
+
+	transformed = plainTraitsResult + transformed.slice(plainTraitsCursor);
+
+	//Pass 2d: pure trait-path-string arrays — array literals whose every element is an @/./.. path,
+	// e.g. a component's base-trait list built inside a script:
+	//   setVariable value: [`@…/input/functional/onValueChanged`, `@…/input/functional/setErrorStyles`, …]
+	// Each element that resolves to a convertible trait becomes a direct import, so at the consuming site
+	// (`typeof traitRef === "function" ? traitRef : dynamicTraitMap_array[traitRef]`) it is applied as a
+	// function ref and NEVER needs the runtime fallback map. These are compile-time constants — the
+	// component's own behaviours — so they should not depend on a data-resolution map at all; leaving them
+	// as strings is what forced those files onto the whole-app fallback map (and broke when it was scoped).
+	// The regex only matches arrays that are ENTIRELY trait-path strings, so mixed/data arrays are
+	// untouched, and per-element conversion is still gated on isConvertibleTrait. Idempotent: an array
+	// already converted to identifiers no longer matches.
+	transformed = transformed.replace(PURE_TRAIT_PATH_ARRAY_REGEX, arrayMatch =>
+		arrayMatch.replace(TRAIT_PATH_STRING_ANY_QUOTE_REGEX, convertTraitPathString)
 	);
 
 	//Pass 3: dynamic (interpolated) trait templates, e.g. trait: `@l2_buttons/visual/${type}/index`.

@@ -23,7 +23,7 @@ const buildDynamicTraitMap = (mapKey, candidates) => {
 
 	return registerDynamicTraitMap(
 		mapKey,
-		candidates.map(({ value, type }) => ({ value, type }))
+		candidates.map(({ value, type, isComponentTrait }) => ({ value, type, isComponentTrait }))
 	);
 };
 

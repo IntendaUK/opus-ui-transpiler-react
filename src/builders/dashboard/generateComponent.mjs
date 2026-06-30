@@ -5,7 +5,9 @@ import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponent
 import {
 	getDynamicRootTypeInfo,
 	registerDynamicRootTypeComponentMap,
-	getDynamicTraitFlatCandidates
+	getDynamicTraitFlatCandidates,
+	getDynamicTraitFieldCandidates,
+	getDynamicTraitFieldNarrowable
 } from './dynamicRootTypes.mjs';
 
 //Helpers
@@ -14,6 +16,18 @@ import buildTraitsInfo from './buildTraitsInfo.mjs';
 import buildDynamicTraitMap from './buildDynamicTraitMap.mjs';
 import injectTraitPrpsInString from './injectTraitPrpsInString.mjs';
 import buildTraitPrpsAccessor from './traitPrpsAccessor.mjs';
+
+//A root COMPONENT trait can also be referenced as a CONFIG trait (e.g. a grid's `traitDataManager`),
+// where the consumer merges the trait's CONFIG via applyTraits instead of rendering its JSX. When such
+// a root component-trait is generated, we capture a config-only form of its trait application here so
+// templates can append it as `Component.traitConfig`. Reset per file via initRootTraitConfig.
+let rootTraitConfig;
+
+export const initRootTraitConfig = () => {
+	rootTraitConfig = undefined;
+};
+
+export const getRootTraitConfig = () => rootTraitConfig;
 
 //A %token%/$token$ used as a component type means the type is resolved at runtime from a trait prop.
 const isDynamicTypeToken = value => typeof(value) === 'string' &&
@@ -33,6 +47,37 @@ const buildFunctionalTraitPrps = traitPrps => {
 	return `{${propsString}}`;
 };
 
+//A dynamic-trait site's KEY expression is a traitPrps accessor (e.g. `traitPrps.traitDataManager`).
+// When it is a SIMPLE single-field accessor we can scope the emitted candidate map to just that field's
+// statically-discovered options instead of inlining the whole-app flat set into every consuming file.
+const SIMPLE_FIELD_ACCESSOR_REGEX = /^\(*\s*traitPrps\.([A-Za-z_$][\w$]*)\s*\)*$/;
+
+const extractDynamicTraitField = expression => {
+	if (typeof(expression) !== 'string')
+		return;
+
+	const match = expression.match(SIMPLE_FIELD_ACCESSOR_REGEX);
+
+	return match?.[1];
+};
+
+//Choose the candidate map for a dynamic-trait KEY expression. If the key is a simple `traitPrps.<field>`
+// accessor AND that field is narrowable (every value it can hold was discovered statically — literal
+// trait paths plus theme-resolved defaults), emit a field-scoped map holding only that field's options.
+// Otherwise (nested/non-simple key, or a field that can carry an unknown runtime value) keep the
+// whole-app flat set so a string value sourced from anywhere still resolves.
+const buildScopedDynamicTraitMap = expression => {
+	const field = extractDynamicTraitField(expression);
+
+	if (field && getDynamicTraitFieldNarrowable(field))
+		return buildDynamicTraitMap(field, getDynamicTraitFieldCandidates(field));
+
+	if (field)
+		console.warn(`[dynamic-trait] Field "${field}" is not narrowable (can hold a runtime/unresolved value); using the whole-app candidate set.`);
+
+	return buildDynamicTraitMap('array', getDynamicTraitFlatCandidates());
+};
+
 const buildTraitApplication = trait => {
 	const wrapCondition = expression => {
 		if (!trait.condition)
@@ -49,13 +94,12 @@ const buildTraitApplication = trait => {
 	//A dynamic trait reference resolves at runtime in one of two ways: it may ALREADY be a transpiled
 	// trait function (a handler/MDA built it as `{ trait: <importedFn> }` — the transpiler rewrites such
 	// functional-trait paths into direct imports), in which case it is called directly; otherwise it is
-	// a path string looked up in the per-file candidate map. The whole-app candidate set is used (not a
-	// field-scoped subset) so a string value sourced from anywhere still resolves.
+	// a path string looked up in the per-file candidate map.
 	const resolveRef = (refExpr, mapName) =>
 		`(typeof(${refExpr}) === 'function' ? ${refExpr} : ${mapName}[${refExpr}])`;
 
 	if (trait.isDynamicArray) {
-		const mapName = buildDynamicTraitMap('array', getDynamicTraitFlatCandidates());
+		const mapName = buildScopedDynamicTraitMap(trait.expression);
 
 		const mappedTraits = `(${trait.expression} ?? []).map(trait => {
 			const traitRef = trait.trait ?? trait;
@@ -76,7 +120,7 @@ const buildTraitApplication = trait => {
 	}
 
 	if (trait.isDynamic) {
-		const mapName = buildDynamicTraitMap('array', getDynamicTraitFlatCandidates());
+		const mapName = buildScopedDynamicTraitMap(trait.expression);
 
 		return wrapCondition(`${resolveRef(trait.expression, mapName)}?.(${buildFunctionalTraitPrps(trait.traitPrps)})`);
 	}
@@ -259,8 +303,17 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 	let traitsString = '';
 
 	if (hasFunctionalTraits && !isFunctionalTraitObject) {
+		const otherTraitsString = traitsInfo.otherTraits.map(buildTraitApplication).join(',');
+
+		//Capture a config-only form of this root component-trait so it can be reused when the trait is
+		// referenced as a CONFIG trait (e.g. a grid's `traitDataManager`). Same prps + otherTraits as the
+		// component, but no sysPrps/scope and no JSX wrapper — applyTraits yields the merged config object.
+		// Captured here, before prpsString is cleared below.
+		if (isRootLevel)
+			rootTraitConfig = `(traitPrps = {}, prps = {}) => applyTraits({ prps: {${prpsString}}, traits: [${otherTraitsString}] })`;
+
 		traitsString = `
-			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${traitsInfo.otherTraits.map(buildTraitApplication).join(',')}] }) }
+			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${otherTraitsString}] }) }
 		`;
 
 		sysPrpsString = '';

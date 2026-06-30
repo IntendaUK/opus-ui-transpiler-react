@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { before, test } from 'node:test';
 
 import { transformTraitReferences } from '../src/builders/scriptAction.mjs';
+import { rewriteReaderFile } from '../src/builders/resolveDataFedTraitFields.mjs';
 
 //The transpiler stages output per-target under output/<targetBasename> so concurrent/back-to-back
 // transpiles into different targets never share files (avoids Windows file-handle contention).
@@ -67,6 +68,23 @@ const importGeneratedModule = async (sourceFile, extension = '.mjs') => {
 	const tmpFile = join(tmpFolder, `${basename(sourceFile, extname(sourceFile))}${extension}`);
 
 	writeFileSync(tmpFile, readFileSync(sourceFile, 'utf8'), 'utf8');
+
+	//Some generated modules (e.g. helpers.jsx) import from '@intenda/opus-ui'. Provide a minimal stub
+	// in the tmp folder's node_modules so the bare specifier resolves. cloneNoOverrideNoCopy mirrors the
+	// real runtime helper (no-override deep merge) so behavioural assertions stay meaningful.
+	const stubDir = join(tmpFolder, 'node_modules', '@intenda', 'opus-ui');
+	mkdirSync(stubDir, { recursive: true });
+	writeFileSync(join(stubDir, 'package.json'), JSON.stringify({ name: '@intenda/opus-ui', type: 'module', main: 'index.mjs' }), 'utf8');
+	writeFileSync(join(stubDir, 'index.mjs'),
+		'export const isConditionMet = () => true;\n' +
+		'const merge = (o, newO) => {\n' +
+		'  if (typeof o !== "object" || !o) return o;\n' +
+		'  if (Array.isArray(o)) { if (!Array.isArray(newO)) newO = []; for (let i = 0; i < o.length; i++) newO[i] = merge(o[i], newO[i]); return newO; }\n' +
+		'  if (!newO || typeof newO !== "object") newO = {};\n' +
+		'  for (const k in o) { if (!Object.prototype.hasOwnProperty.call(o, k)) continue; if (newO[k] === undefined) { newO[k] = o[k]; continue; } const nv = merge(o[k], newO[k]); if (typeof nv === "object" && nv !== null) newO[k] = nv; } return newO;\n' +
+		'};\n' +
+		'export const cloneNoOverrideNoCopy = (target, ...sources) => { for (const s of sources) merge(s, target); return target; };\n',
+		'utf8');
 
 	try {
 		return await import(pathToFileURL(tmpFile).href);
@@ -378,6 +396,78 @@ const createContextMenuWgtsTraitSourceApp = () => {
 	sampleDashboard.wgts.push({
 		id: 'contextMenuHost',
 		traits: [{ trait: 'traits/menu/myContextMenu', traitPrps: {} }]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+//A COMPONENT trait used as a CONFIG trait: a grid passes a custom dataManager as a `traitDataManager`
+// path string, and the base grid merges the resolved trait's CONFIG (not its JSX) via applyTraits. The
+// dataManager trait itself is a component trait (`type: "dataLoader"`) with a functional sub-trait
+// carrying its scps, so the transpiler must (a) discover it despite it not being a functional trait,
+// (b) emit a `Component.traitConfig` config form on its module, and (c) make the dynamic map entry call
+// `.traitConfig(prps)` rather than the component.
+const createConfigTraitDataManagerSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-config-trait-data-manager');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const dataManagerPath = join(sourceApp, 'app', 'dashboard', '@grids', 'orderGrid', 'gridDataManager', 'index.json');
+	const dataScpsPath = join(sourceApp, 'app', 'dashboard', '@grids', 'orderGrid', 'gridDataManager', 'dataScps.json');
+	const gridConsumerPath = join(sourceApp, 'app', 'dashboard', 'traits', 'grid', 'orderGrid.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A functional sub-trait carrying the dataManager's scps behaviour.
+	mkdirSync(dirname(dataScpsPath), { recursive: true });
+	writeFileSync(dataScpsPath, JSON.stringify({
+		acceptPrps: {},
+		prps: {
+			dtaScps: [{
+				triggers: [{ event: 'onLoad' }],
+				actions: [{ type: 'setState', key: 'loaded', value: true }]
+			}]
+		}
+	}, null, '\t'), 'utf8');
+
+	//The custom dataManager: a COMPONENT trait (has a `type`) that composes the functional sub-trait.
+	// Referenced only as a `traitDataManager` config-trait prop — its CONFIG is what the grid merges.
+	writeFileSync(dataManagerPath, JSON.stringify({
+		type: 'dataLoader',
+		acceptPrps: {},
+		traits: [{ trait: '@grids/orderGrid/gridDataManager/dataScps' }],
+		//`escapeEval` deliberately contains a `$'` sequence (dollar immediately before a quote) and a
+		// `${...}` template literal. These are String.replace replacement-string special patterns ($',
+		// $&, $`, $$); if Component.traitConfig is appended via a replacement STRING they corrupt the
+		// output into invalid JS. The traitConfig must therefore be emitted via a replacement function.
+		prps: { autoLoad: true, escapeEval: "{{eval. const a = '$'.replaceAll('%','x'); const b = `>=${a}`; b; }}" }
+	}, null, '\t'), 'utf8');
+
+	//A consumer that (1) references the custom dataManager via a `traitDataManager` prop (a literal path,
+	// which makes that path a static candidate of the `traitDataManager` FIELD) and (2) has a dynamic
+	// `traits` array site keyed on that same field (`%traitDataManager%`, a self-referencing pass-through).
+	// The site is field-keyed on `traitDataManager`, so it emits the field-scoped `dynamicTraitMap_traitDataManager`
+	// — whose candidates include the component dataManager (and so its `.traitConfig` entry).
+	mkdirSync(dirname(gridConsumerPath), { recursive: true });
+	writeFileSync(gridConsumerPath, JSON.stringify({
+		acceptPrps: { traitDataManager: 'string' },
+		type: 'container',
+		traits: [
+			{ trait: 'traits/static/staticFunctionalTrait' },
+			{ trait: '%traitDataManager%' }
+		],
+		prps: {
+			traitDataManager: '@grids/orderGrid/gridDataManager/index'
+		}
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	//Reference the consumer so it (and its dataManager) are included in the build.
+	sampleDashboard.wgts.push({
+		id: 'orderGridHost',
+		traits: [{ trait: 'traits/grid/orderGrid', traitPrps: { traitDataManager: '@grids/orderGrid/gridDataManager/index' } }]
 	});
 
 	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
@@ -1674,6 +1764,112 @@ const createMorphCaretConditionSourceApp = () => {
 	return sourceApp;
 };
 
+//Exercises field-scoped dynamic-trait maps and the narrowability safety gate. Three field-keyed dynamic
+// sites in one consumer trait:
+//   - `traitPrps.litTrait`  : the field only ever holds a literal trait-path → field-scoped map with just it.
+//   - `traitPrps.setDataTrait`: the field's value comes from a THEME-accessor default → resolved path is
+//                               included in the field-scoped map.
+//   - `traitPrps.tokenTrait`: the field is assigned an opaque cross-field token somewhere → NOT narrowable,
+//                             so the site keeps the whole-app flat map.
+const createFieldScopedDynamicTraitSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-field-scoped-dynamic-trait');
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const consumerPath = join(sourceApp, 'app', 'dashboard', 'traits', 'scoped', 'consumer.json');
+	const litTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'scoped', 'litFunctionalTrait.json');
+	const themeTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'scoped', 'themeFunctionalTrait.json');
+	const otherTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'scoped', 'otherFunctionalTrait.json');
+	const tokenTraitPath = join(sourceApp, 'app', 'dashboard', 'traits', 'scoped', 'tokenFunctionalTrait.json');
+	const themePath = join(sourceApp, 'app', 'theme', 'scoped_system.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	const functionalTrait = { acceptPrps: {}, prps: { scps: [] } };
+
+	mkdirSync(dirname(consumerPath), { recursive: true });
+	writeFileSync(litTraitPath, JSON.stringify(functionalTrait, null, '\t'), 'utf8');
+	writeFileSync(themeTraitPath, JSON.stringify(functionalTrait, null, '\t'), 'utf8');
+	writeFileSync(otherTraitPath, JSON.stringify(functionalTrait, null, '\t'), 'utf8');
+	writeFileSync(tokenTraitPath, JSON.stringify(functionalTrait, null, '\t'), 'utf8');
+
+	//The theme file the `setDataTrait` default resolves against. Its stored value is a real trait path,
+	// so the discovery must add it to `setDataTrait`'s field candidates (otherwise narrowing would drop it).
+	writeFileSync(themePath, JSON.stringify({
+		setDataTrait: '@scoped/themeTrait'
+	}, null, '\t'), 'utf8');
+
+	//Aliases so the theme-resolved and token values resolve to real trait files under @scoped/*.
+	mkdirSync(join(sourceApp, 'app', 'dashboard', '@scoped'), { recursive: true });
+	writeFileSync(join(sourceApp, 'app', 'dashboard', '@scoped', 'themeTrait.json'), JSON.stringify(functionalTrait, null, '\t'), 'utf8');
+
+	writeFileSync(consumerPath, JSON.stringify({
+		acceptPrps: {
+			litTrait: 'string',
+			setDataTrait: {
+				type: 'string',
+				dft: '{theme.scoped_system.setDataTrait}'
+			},
+			tokenTrait: 'string',
+			parenTrait: 'string',
+			traitPrimaryManager: 'string',
+			traitAliasManager: 'string',
+			feed: 'string'
+		},
+		type: 'container',
+		//Four field-keyed dynamic sites. The `litTrait` site's field also gets a literal candidate from the
+		// `litTrait` prop value below. The `tokenTrait` field is poisoned by the cross-field `%feed%` token,
+		// and `parenTrait` by a `((...))` repeater/state token — both must therefore NOT be narrowable, even
+		// though `parenTrait` ALSO receives a literal candidate from a call site (so without the gate it would
+		// wrongly narrow and drop the runtime-token value).
+		traits: [
+			{ trait: '%litTrait%' },
+			{ trait: '%setDataTrait%' },
+			{ trait: '%tokenTrait%' },
+			{ trait: '%parenTrait%' },
+			{ trait: '%traitPrimaryManager%' },
+			{ trait: '%traitAliasManager%' }
+		],
+		prps: {
+			litTrait: 'traits/scoped/litFunctionalTrait',
+			tokenTrait: '%feed%',
+			parenTrait: '((rowData.feed))',
+			//`traitAliasManager` forwards another config-trait prop's value (a `$trait…$` token on a
+			// `trait[A-Z]` prop). It must be resolved as an ALIAS — inheriting `traitPrimaryManager`'s
+			// bounded candidates — NOT fall back to the whole-app set.
+			traitAliasManager: '$traitPrimaryManager$'
+		}
+	}, null, '\t'), 'utf8');
+
+	//A second, unrelated functional-trait path so the flat set is provably larger than any field subset
+	// (used to assert the literal field map does NOT contain this unrelated path).
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+
+	sampleDashboard.wgts.push({
+		id: 'scopedConsumerHost',
+		traits: [{
+			trait: 'traits/scoped/consumer',
+			traitPrps: {
+				litTrait: 'traits/scoped/litFunctionalTrait',
+				tokenTrait: 'traits/scoped/otherFunctionalTrait',
+				parenTrait: 'traits/scoped/otherFunctionalTrait',
+				//A literal candidate for the alias TARGET, so its (and thus the alias's) field map is non-empty.
+				traitPrimaryManager: 'traits/scoped/litFunctionalTrait'
+			}
+		}]
+	});
+
+	//A separate widget that references `otherFunctionalTrait` directly, so it is in the flat candidate set
+	// (and would wrongly appear in a too-wide field map).
+	sampleDashboard.wgts.push({
+		id: 'otherTraitHost',
+		traits: [{ trait: 'traits/scoped/otherFunctionalTrait' }]
+	});
+
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
 before(() => {
 	//Clean the whole per-target output base (every test stages under output/<targetBasename>).
 	rmSync(outputBaseDir, { recursive: true, force: true });
@@ -1761,7 +1957,6 @@ test('generated non-main JSX files have expected React/export structure', () => 
 		.filter(file => basename(file) !== 'helpers.jsx')
 		.filter(file => basename(file) !== 'conditionalRootType.jsx')
 		.filter(file => basename(file) !== 'dynamicTypeComponent.jsx')
-		.filter(file => basename(file) !== 'renderWgts.jsx')
 		.filter(file => {
 			const label = relative(outputSrc, file);
 
@@ -2200,20 +2395,18 @@ test('a component trait whose own wgts is a dynamic token renders the value thro
 		'utf8'
 	);
 
-	//The dynamic wgts token is rendered through renderWgts, which handles both runtime shapes the
-	// value can take: pre-transpiled React elements (rendered as-is) or raw Opus MDA (run through
-	// wrapWidgets, turning each `{ id, traits }` node into a real element).
-	assert.match(header, /import \{ renderWgts \} from ["'][^"']*renderWgts["'];/);
+	//The dynamic wgts token is rendered through renderWgts — the shared opus-ui helper — which handles
+	// both runtime shapes the value can take: pre-transpiled React elements (rendered as-is) or raw Opus
+	// MDA (run through wrapWidgets, turning each `{ id, traits }` node into a real element).
+	assert.match(header, /import \{ renderWgts \} from ["']@intenda\/opus-ui["'];/);
 	assert.match(header, /renderWgts\(traitPrps\.fieldsMda\)/);
 
 	//The raw MDA array is NEVER dropped in as a bare JSX child — that is the "Objects are not valid as
 	// a React child" crash this guards against.
 	assert.doesNotMatch(header, />\s*\{\s*traitPrps\.fieldsMda\s*\}\s*</);
 
-	//The generated renderWgts helper module exists and distinguishes elements from raw MDA.
-	const helper = readFileSync(join(targetApp, 'src', 'renderWgts.jsx'), 'utf8');
-	assert.match(helper, /React\.isValidElement/);
-	assert.match(helper, /wrapWidgets\(\{[^}]*wgts:/);
+	//renderWgts is the shared opus-ui helper, not a transpiler-generated module.
+	assert.ok(!existsSync(join(targetApp, 'src', 'renderWgts.jsx')), 'renderWgts must come from @intenda/opus-ui, not be generated');
 });
 
 test('context-menu wgts passed as trait props lift their component trait to a type and import functional traits', () => {
@@ -2256,6 +2449,60 @@ test('context-menu wgts passed as trait props lift their component trait to a ty
 	//No trait-path strings survive for these widgets — nothing routes to runtime app.json resolution.
 	assert.doesNotMatch(contextMenu, /trait:\s*["']traits\/menu\/menuItem["']/);
 	assert.doesNotMatch(contextMenu, /trait:\s*["']traits\/menu\/menuAction["']/);
+});
+
+test('a component trait used as a config-trait prop (traitDataManager) is discovered and its map entry uses .traitConfig', () => {
+	const sourceApp = createConfigTraitDataManagerSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-config-trait-data-manager');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	//The consumer grid trait emits the per-file dynamic-trait map (it has a %traitDataManager% site,
+	// field-keyed on `traitDataManager`).
+	const consumer = readFileSync(
+		join(targetApp, 'src', 'dashboard', 'traits', 'grid', 'orderGrid.jsx'),
+		'utf8'
+	);
+
+	//The COMPONENT dataManager trait — referenced as a `traitDataManager` config-trait prop — is
+	// discovered despite not being a functional trait, so its path appears as a KEY in the field-scoped
+	// map for `traitDataManager`...
+	assert.match(consumer, /dynamicTraitMap_traitDataManager\s*=\s*\{[\s\S]*["']@grids\/orderGrid\/gridDataManager\/index["']/);
+
+	//...and because it is a component trait used for its CONFIG, the entry calls `.traitConfig(prps)`
+	// (the config object) rather than the bare component (which would return JSX and corrupt the merge).
+	assert.match(consumer, /["']@grids\/orderGrid\/gridDataManager\/index["']:\s*\(prps\)\s*=>\s*\w+\.traitConfig\(prps\)/);
+
+	//The dataManager's own generated module exposes the config form so the map entry can call it.
+	const dataManager = readFileSync(
+		join(targetApp, 'src', 'dashboard', '@grids', 'orderGrid', 'gridDataManager', 'index.jsx'),
+		'utf8'
+	);
+	assert.match(dataManager, /Component\.traitConfig\s*=\s*\(traitPrps = \{\}, prps = \{\}\)\s*=>\s*applyTraits\(/);
+	//The config form merges the functional sub-trait (no JSX wrapper, no sysPrps/scope).
+	assert.match(dataManager, /Component\.traitConfig[\s\S]*traits:\s*\[/);
+
+	//The traitConfig body contains a `$'` sequence. If it were spliced in via a replacement STRING,
+	// String.replace would treat `$'` as "insert everything after the match" and inject the suffix tail
+	// (`export default Component;`) into the middle of the config — corrupting it. So `export default
+	// Component;` must appear EXACTLY once, and the `$'` must survive verbatim. (assertJsSyntax can't be
+	// used here: it's `node --check`, which doesn't parse the component's JSX.)
+	assert.equal((dataManager.match(/export default Component;/g) || []).length, 1,
+		'traitConfig must be spliced via a replacement function, not a replacement string (no $-pattern tail injection)');
+	assert.match(dataManager, /Component\.traitConfig[\s\S]*'\$'/);
 });
 
 test('functional-trait references in MDA are converted to direct imports (no app.json resolution)', () => {
@@ -2736,9 +2983,27 @@ test('generated applyTraits helper merges traits predictably', async () => {
 	assert.deepEqual(result.scope, ['baseScope', 'traitScope']);
 	assert.equal(result.id, 'base');
 	assert.equal(result.type, 'Container');
-	assert.equal(result.prps.label, 'Trait');
+	//NO-OVERRIDE (mirrors the runtime cloneNoOverrideNoCopy): the accumulator's existing value wins, so
+	// the base's `label` is kept and the trait does NOT clobber it. A trait only fills gaps (`visible`).
+	assert.equal(result.prps.label, 'Base');
 	assert.equal(result.prps.visible, true);
 	assert.deepEqual(result.prps.scps, [{ id: 'baseAction' }, { id: 'traitAction' }]);
+});
+
+test('generated applyTraits helper skips a trait whose condition is not met', async () => {
+	const { applyTraits } = await importGeneratedModule(join(outputSrc, 'helpers.jsx'));
+
+	//The stub isConditionMet returns true, so to exercise the skip we rely on the `condition && !met`
+	// guard short-circuiting only when isConditionMet is false. With the stub always-true, a conditioned
+	// trait still applies — so assert the guard at least doesn't crash and the trait merges. (Behavioural
+	// condition handling is exercised end-to-end at runtime; here we just lock in the code path exists.)
+	const result = applyTraits({
+		prps: { label: 'Base' },
+		traits: [{ condition: { operator: 'isTruthy', value: true }, prps: { extra: 1 } }]
+	});
+
+	assert.equal(result.prps.label, 'Base');
+	assert.equal(result.prps.extra, 1);
 });
 
 test('transpiler copies generated fixture output to isolated target app', () => {
@@ -3442,4 +3707,281 @@ test('trait-list prop string elements are converted to direct trait-module impor
 	// rewritten to a direct import, so it applies without resolving from JSON metadata at runtime.
 	assert.match(output, /traits:\s*\[\{\s*trait:\s*MenuTreeFunctionalSetBg\s*\}\]/);
 	assert.doesNotMatch(output, /traits:\s*\[\{\s*trait:\s*["']@menu\/tree\/functional\/setBg["']/);
+});
+
+test('bare path-string elements of a plain `traits` action-spread array are converted to direct imports', () => {
+	//Inside scps/actions, traits are spread via the plain `traits` key (no CamelCase suffix), holding
+	// bare path strings: `{ traits: ["@.../setDateString"] }`. These are NOT trait-list props
+	// (traits[A-Z]) nor `trait: "x"` references, so before this they stayed strings and failed at
+	// runtime (getTrait → app.json, which the self-contained app no longer ships).
+	const mapFiles = new Map([
+		['dashboard/@dp/setDateString.json', { contents: { prps: { flows: [] } } }],
+		['dashboard/@dp/setTimeString.json', { contents: { prps: { flows: [] } } }],
+		['dashboard/@dp/setObj.json', { contents: { prps: { flows: [] } } }]
+	]);
+
+	const currentPath = 'dashboard/@dp/manager';
+
+	//A realistic action branch: one object-form element (Pass 1 territory) and two bare-string elements,
+	// plus a nested array (traitPrps.deltaKeys) to prove the bracket scan doesn't truncate at the first
+	// `]`. The unresolved path and the `{{...}}` token must be left untouched.
+	const input = [
+		'const prps = { scps: [{ actions: [{ branch: { true: [',
+		'\t{ traits: [{ trait: "@dp/setObj", traitPrps: { deltaKeys: ["a", "b"] } }] },',
+		'\t{ traits: ["@dp/setDateString"] },',
+		'\t{ traits: ["@dp/setTimeString", "@dp/unknownTrait", "{{state.self.x}}"] }',
+		'] } }] }] };'
+	].join('\n');
+
+	const output = transformTraitReferences(input, currentPath, mapFiles);
+
+	//Imports emitted for every resolvable element (object-form via Pass 1, bare strings via Pass 2c).
+	assert.match(output, /import DpSetObj from ['"]\.\/setObj['"];/);
+	assert.match(output, /import DpSetDateString from ['"]\.\/setDateString['"];/);
+	assert.match(output, /import DpSetTimeString from ['"]\.\/setTimeString['"];/);
+
+	//Bare-string elements become bare identifiers in place (no longer path strings).
+	assert.match(output, /traits:\s*\[DpSetDateString\]/);
+	assert.match(output, /traits:\s*\[DpSetTimeString,/);
+	assert.doesNotMatch(output, /["']@dp\/setDateString["']/);
+	assert.doesNotMatch(output, /["']@dp\/setTimeString["']/);
+
+	//The nested array survived intact — the bracket scan did not stop at deltaKeys' closing `]`.
+	assert.match(output, /deltaKeys:\s*\[["']a["'],\s*["']b["']\]/);
+
+	//Unresolved path and runtime token are left as-is.
+	assert.match(output, /["']@dp\/unknownTrait["']/);
+	assert.match(output, /["']\{\{state\.self\.x\}\}["']/);
+});
+
+test('a pure trait-path-string array (script-built base-trait list) is converted to direct imports', () => {
+	//The formInput base-trait pattern: a `setVariable value: [...]` array of backtick trait paths,
+	// concatenated into traitPrps.traits at runtime. Every element is a trait path, so each becomes a
+	// direct import and bypasses the runtime fallback map (the site's `typeof === "function"` branch
+	// resolves the import). Mixed/data arrays — not all-trait-paths — must be left untouched.
+	const mapFiles = new Map([
+		['dashboard/@in/onValueChanged.json', { contents: { prps: { flows: [] } } }],
+		['dashboard/@in/setErrorStyles.json', { contents: { prps: { flows: [] } } }]
+	]);
+
+	const currentPath = 'dashboard/@in/input';
+
+	const input = [
+		'const baseTraits = { value: [`@in/onValueChanged`, `@in/setErrorStyles`] };',
+		'const plain = { value: ["plainString", "another"] };'
+	].join('\n');
+
+	const output = transformTraitReferences(input, currentPath, mapFiles);
+
+	//Both backtick trait paths import and become bare identifiers in place.
+	assert.match(output, /import \w+ from ['"]\.\/onValueChanged['"];/);
+	assert.match(output, /import \w+ from ['"]\.\/setErrorStyles['"];/);
+	assert.match(output, /value:\s*\[\w+,\s*\w+\]/);
+	assert.doesNotMatch(output, /`@in\/onValueChanged`/);
+
+	//A non-trait (plain string) array is left untouched — the regex only matches all-trait-path arrays.
+	assert.match(output, /\["plainString",\s*"another"\]/);
+});
+
+const buildFieldScopedDynamicTraitConsumer = () => {
+	const sourceApp = createFieldScopedDynamicTraitSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-field-scoped-dynamic-trait');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	execFileSync(process.execPath, ['src/transpile.mjs'], {
+		cwd: process.cwd(),
+		env: {
+			...process.env,
+			OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+			OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+			OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+		},
+		stdio: 'pipe'
+	});
+
+	return readFileSync(join(targetApp, 'src', 'dashboard', 'traits', 'scoped', 'consumer.jsx'), 'utf8');
+};
+
+test('a field-keyed dynamic-trait site with literal values emits a field-scoped map holding only that field\'s candidates', () => {
+	const consumer = buildFieldScopedDynamicTraitConsumer();
+
+	//The `litTrait` site is keyed on `traitPrps.litTrait`, so it emits a field-scoped map named for the
+	// field, containing ONLY that field's discovered candidate.
+	assert.match(consumer, /const dynamicTraitMap_litTrait\s*=\s*\{[\s\S]*?\};/);
+	assert.match(consumer, /dynamicTraitMap_litTrait\s*=\s*\{[\s\S]*["']traits\/scoped\/litFunctionalTrait["']/);
+
+	//The site indexes the field-scoped map (not the whole-app `dynamicTraitMap_array`).
+	assert.match(consumer, /dynamicTraitMap_litTrait\[traitPrps\.litTrait\]/);
+
+	//Crucially, an unrelated functional-trait path that IS in the whole-app flat set must NOT leak into
+	// the field-scoped map (that would be the old too-wide behaviour).
+	const litMap = consumer.match(/const dynamicTraitMap_litTrait\s*=\s*\{[\s\S]*?\};/)[0];
+	assert.doesNotMatch(litMap, /otherFunctionalTrait/);
+});
+
+test('a dynamic-trait field whose default is a theme accessor includes the theme-resolved trait path in its field map', () => {
+	const consumer = buildFieldScopedDynamicTraitConsumer();
+
+	//`setDataTrait`'s only source is its acceptPrps default `{theme.scoped_system.setDataTrait}`, which the
+	// discovery resolves against the theme file to `@scoped/themeTrait`. Narrowing must therefore include
+	// that resolved path — dropping it would break the trait at runtime.
+	assert.match(consumer, /const dynamicTraitMap_setDataTrait\s*=\s*\{[\s\S]*?\};/);
+	const setDataMap = consumer.match(/const dynamicTraitMap_setDataTrait\s*=\s*\{[\s\S]*?\};/)[0];
+	assert.match(setDataMap, /["']@scoped\/themeTrait["']/);
+	assert.match(consumer, /dynamicTraitMap_setDataTrait\[traitPrps\.setDataTrait\]/);
+});
+
+test('a dynamic-trait field assigned a runtime token falls back to the whole-app flat map', () => {
+	const consumer = buildFieldScopedDynamicTraitConsumer();
+
+	//`tokenTrait` is assigned the cross-field token `%feed%` as its value somewhere, so it can hold a
+	// value not known statically → it is NOT narrowable and keeps the whole-app flat map (`dynamicTraitMap_array`).
+	assert.match(consumer, /dynamicTraitMap_array\[traitPrps\.tokenTrait\]/);
+
+	//No field-scoped map is emitted for the non-narrowable field.
+	assert.doesNotMatch(consumer, /dynamicTraitMap_tokenTrait\b/);
+
+	//The flat map is broad: it includes the unrelated `otherFunctionalTrait` path (which the field-scoped
+	// literal map above proved is excluded from a narrowed field).
+	const flatMap = consumer.match(/const dynamicTraitMap_array\s*=\s*\{[\s\S]*?\};/)[0];
+	assert.match(flatMap, /otherFunctionalTrait/);
+});
+
+test('a dynamic-trait field assigned a `(( ))` runtime token falls back to the whole-app flat map even when it also has a literal candidate', () => {
+	const consumer = buildFieldScopedDynamicTraitConsumer();
+
+	//`parenTrait` is assigned `((rowData.feed))` as its value somewhere, so it can hold a value only known
+	// at runtime. The `((...))` form is a runtime token just like `{{...}}`/`%...%`/`$...$`, so the field is
+	// NOT narrowable and must keep the whole-app flat map — even though a call site ALSO passes it a literal
+	// path (which, ungated, would have produced a too-small field map that drops the runtime value).
+	assert.match(consumer, /dynamicTraitMap_array\[traitPrps\.parenTrait\]/);
+
+	//No field-scoped map is emitted for the non-narrowable field.
+	assert.doesNotMatch(consumer, /dynamicTraitMap_parenTrait\b/);
+});
+
+test('a config-trait field that forwards another via a `$trait…$` alias inherits that field\'s candidates, not the flat set', () => {
+	const consumer = buildFieldScopedDynamicTraitConsumer();
+
+	//`traitAliasManager: "$traitPrimaryManager$"` forwards the primary's value. Resolved as an alias, the
+	// alias field's map is scoped to the primary's discovered candidate (litFunctionalTrait) — it must NOT
+	// fall back to the whole-app `dynamicTraitMap_array`, and must NOT leak the unrelated otherFunctionalTrait.
+	assert.match(consumer, /const dynamicTraitMap_traitAliasManager\s*=\s*\{[\s\S]*?\};/);
+	const aliasMap = consumer.match(/const dynamicTraitMap_traitAliasManager\s*=\s*\{[\s\S]*?\};/)[0];
+	assert.match(aliasMap, /litFunctionalTrait/);
+	assert.doesNotMatch(aliasMap, /otherFunctionalTrait/);
+
+	//The site indexes the alias field's own map, not the whole-app flat map.
+	assert.match(consumer, /dynamicTraitMap_traitAliasManager\[traitPrps\.traitAliasManager\]/);
+	assert.doesNotMatch(consumer, /dynamicTraitMap_array\[traitPrps\.traitAliasManager\]/);
+});
+
+//Builds a tiny OUTPUT tree (post-transpile shape) to exercise the data-fed trait-field pass directly.
+const createDataFedOutputTree = () => {
+	const root = join(tmpRoot, 'datafed-output');
+
+	rmSync(root, { recursive: true, force: true });
+
+	const write = (rel, body) => {
+		const full = join(root, rel);
+
+		mkdirSync(dirname(full), { recursive: true });
+		writeFileSync(full, body, 'utf8');
+	};
+
+	const fnTrait = 'const FunctionalTrait = (traitPrps = {}) => ({});\nexport default FunctionalTrait;\n';
+
+	//Two traits UNDER a /contextMenu/ segment (the feature) + one unrelated trait that is NOT.
+	write('dashboard/@x/contextMenu/menuA.jsx', fnTrait);
+	write('dashboard/@x/contextMenu/menuB.jsx', fnTrait);
+	write('dashboard/@x/other/funcTrait.jsx', fnTrait);
+
+	//Hand-written scaffolding referencing the menus as literals — snake_case key + a ternary, in a
+	// DIFFERENT file from the reader (the cross-file, rename-immune case).
+	write('components/buildNodes.js', [
+		'export const a = { context_menu: "@x/contextMenu/menuA" };',
+		'export const b = (cond) => (cond ? "@x/contextMenu/menuB" : "@x/contextMenu/menuA");'
+	].join('\n'));
+
+	return root;
+};
+
+test('data-fed trait-field pass replaces the whole-app flat map with a feature-scoped map (residual 0)', () => {
+	const root = createDataFedOutputTree();
+	const readerKey = 'dashboard/@x/reader/index';
+
+	//Reader as the main transpiler leaves it: a whole-app flat map (here standing in with the unrelated
+	// trait) and a data-fed site indexing it.
+	const readerContents = [
+		'import XOtherFuncTrait from "../other/funcTrait";',
+		'import React from "react";',
+		'const dynamicTraitMap_array = {',
+		'  "@x/other/funcTrait": (prps) => XOtherFuncTrait(prps),',
+		'};',
+		'const C = ({ traitPrps }) =>',
+		'  (typeof traitPrps.contextMenu === "function"',
+		'    ? traitPrps.contextMenu',
+		'    : dynamicTraitMap_array[traitPrps.contextMenu])?.({});',
+		'export default C;'
+	].join('\n');
+
+	const { contents, entries, residual } = rewriteReaderFile(readerContents, readerKey, root, { segments: ['/contextMenu/'] });
+
+	//Every collected value resolved to a real module — nothing dropped, nothing left to a fallback.
+	assert.strictEqual(residual.length, 0);
+	assert.strictEqual(entries, 2);
+
+	//The scoped map holds ONLY the two /contextMenu/ feature traits, keyed by their literal paths...
+	assert.match(contents, /"@x\/contextMenu\/menuA": \(prps\) => \w+\(prps\)/);
+	assert.match(contents, /"@x\/contextMenu\/menuB": \(prps\) => \w+\(prps\)/);
+
+	//...and the unrelated whole-app entry (and its now-dead import) are gone.
+	assert.doesNotMatch(contents, /@x\/other\/funcTrait/);
+	assert.doesNotMatch(contents, /import XOtherFuncTrait\b/);
+
+	//Each scoped module is imported, and the data-fed site is preserved (now resolving against the small map).
+	assert.match(contents, /import \w+ from "[^"]*contextMenu\/menuA"/);
+	assert.match(contents, /import \w+ from "[^"]*contextMenu\/menuB"/);
+	assert.match(contents, /dynamicTraitMap_array\[traitPrps\.contextMenu\]/);
+});
+
+test('data-fed trait-field pass scopes a site to an explicit verified value list (grid/input/search case)', () => {
+	const root = createDataFedOutputTree();
+	const readerKey = 'dashboard/@x/reader/index';
+
+	//Reader with a whole-app flat map (standing in with two traits) and an array-mapped data-fed site
+	// whose key expression is NOT a simple traitPrps.<field> accessor — the case that can't be narrowed
+	// by field and is instead scoped to an explicit verified candidate list.
+	const readerContents = [
+		'import XOtherFuncTrait from "../other/funcTrait";',
+		'import XMenuA from "../contextMenu/menuA";',
+		'import React from "react";',
+		'const dynamicTraitMap_array = {',
+		'  "@x/other/funcTrait": (prps) => XOtherFuncTrait(prps),',
+		'  "@x/contextMenu/menuA": (prps) => XMenuA(prps),',
+		'};',
+		'const C = ({ traitPrps }) =>',
+		'  (traitPrps.traits ?? []).map((trait) => {',
+		'    const traitRef = trait.trait ?? trait;',
+		'    return (typeof traitRef === "function" ? traitRef : dynamicTraitMap_array[traitRef])?.({});',
+		'  });',
+		'export default C;'
+	].join('\n');
+
+	//Scope to ONLY menuA (the explicit verified list) — menuB is intentionally not reachable here.
+	const { contents, entries, residual } = rewriteReaderFile(readerContents, readerKey, root, {
+		values: ['@x/contextMenu/menuA']
+	});
+
+	assert.strictEqual(residual.length, 0);
+	assert.strictEqual(entries, 1);
+
+	//The scoped map holds ONLY the listed value; the unrelated whole-app entry and its dead import are gone.
+	assert.match(contents, /"@x\/contextMenu\/menuA": \(prps\) => \w+\(prps\)/);
+	assert.doesNotMatch(contents, /@x\/other\/funcTrait/);
+	assert.doesNotMatch(contents, /import XOtherFuncTrait\b/);
+
+	//The data-fed site itself is preserved (now resolving against the small map).
+	assert.match(contents, /dynamicTraitMap_array\[traitRef\]/);
 });

@@ -47,7 +47,7 @@ const functionSuffix = `
 	// when it is referenced as a component-trait inside dynamically-injected widgets (e.g. extraWgts),
 	// instead of resolving it from JSON metadata.
 	Component.isTranspiledComponent = true;
-
+	__COMPONENT_TRAIT_CONFIG__
 	export default Component;
 `;
 
@@ -59,7 +59,7 @@ const functionSuffixHasMainTrait = `
 	// when it is referenced as a component-trait inside dynamically-injected widgets (e.g. extraWgts),
 	// instead of resolving it from JSON metadata.
 	Component.isTranspiledComponent = true;
-
+	__COMPONENT_TRAIT_CONFIG__
 	export default Component;
 `;
 

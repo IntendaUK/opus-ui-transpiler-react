@@ -17,7 +17,7 @@ import templates from './dashboard/templates.mjs';
 import { initMapFiles } from './dashboard/mapFiles.mjs';
 import normalizeTraits from './dashboard/normalizeTraits.mjs';
 import buildSpreadTrait from './dashboard/buildSpreadTrait.mjs';
-import generateComponent from './dashboard/generateComponent.mjs';
+import generateComponent, { initRootTraitConfig, getRootTraitConfig } from './dashboard/generateComponent.mjs';
 import generatePrefix from './dashboard/generatePrefix.mjs';
 import identifyMainTrait from './dashboard/identifyMainTrait.mjs';
 import generateTraitOnMount from './dashboard/generateTraitOnMount.mjs';
@@ -65,6 +65,7 @@ const dashboard = ({ path, contents }, mapFiles, dynamicRootTypes) => {
 	resetUsedComponentTypes();
 	resetTraitImports();
 	resetScriptImports();
+	initRootTraitConfig();
 
 	let rootComponent = generateComponent(contents, true, true);
 
@@ -87,6 +88,20 @@ const dashboard = ({ path, contents }, mapFiles, dynamicRootTypes) => {
 		usePrefix = templates.functionPrefixHasMainTrait;
 		useSuffix = templates.functionSuffixHasMainTrait;
 	}
+
+	//A root component-trait that was also captured as a CONFIG trait gets a `Component.traitConfig`
+	// closure appended (between the isTranspiledComponent tag and the default export) so consumers
+	// referencing it as e.g. a grid's `traitDataManager` can merge its config via applyTraits. The
+	// __COMPONENT_TRAIT_CONFIG__ placeholder only exists in the component suffixes (not the functional
+	// trait suffix), so it is simply blanked out when no config was captured.
+	const rootTraitConfig = getRootTraitConfig();
+	//Use a replacement FUNCTION, never a replacement string: the config source embeds `$` sequences
+	// (template literals like `${yyyy}`, eval `$arg$`/`%x%` tokens) and String.replace would otherwise
+	// interpret `$&`/$`/$'/$$ in a replacement string and corrupt it (→ "Unterminated string").
+	useSuffix = useSuffix.replace(
+		'__COMPONENT_TRAIT_CONFIG__',
+		() => (rootTraitConfig ? `Component.traitConfig = ${rootTraitConfig};` : '')
+	);
 
 	let onMountMethod = '';
 
