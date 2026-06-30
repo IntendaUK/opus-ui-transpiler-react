@@ -17,6 +17,7 @@ let needsHelpers = false;
 let needsConditionalRootType = false;
 let needsDynamicTypeComponent = false;
 let needsRenderWgts = false;
+let needsRenderDynamicTraits = false;
 
 const getRelativeImportPath = (currentPath, targetPath) => {
 	const currentParts = currentPath.split('/');
@@ -61,6 +62,7 @@ export const initGenerateImports = ({ currentPath: _currentPath }) => {
 	needsConditionalRootType = false;
 	needsDynamicTypeComponent = false;
 	needsRenderWgts = false;
+	needsRenderDynamicTraits = false;
 };
 
 export const setNeedsHelpers = _needsHelpers => {
@@ -77,6 +79,10 @@ export const setNeedsDynamicTypeComponent = _needsDynamicTypeComponent => {
 
 export const setNeedsRenderWgts = _needsRenderWgts => {
 	needsRenderWgts = _needsRenderWgts;
+};
+
+export const setNeedsRenderDynamicTraits = _needsRenderDynamicTraits => {
+	needsRenderDynamicTraits = _needsRenderDynamicTraits;
 };
 
 const generateImports = () => {
@@ -157,6 +163,15 @@ const generateImports = () => {
 	// React elements (rendered as-is) or raw Opus MDA built by a script/handler (run through wrapWidgets).
 	if (needsRenderWgts)
 		res.push("import { renderWgts } from '@intenda/opus-ui';");
+
+	//A typeless grid-cell node whose dynamic trait list (innerTraits / headerTraits) may contain a
+	// COMPONENT trait renders through this helper, which picks the component trait as the element type
+	// (mirroring the runtime's wrapWidgets.findComponentTraitIndex) instead of merge-calling it.
+	if (needsRenderDynamicTraits) {
+		const relativePath = getRelativeImportPath(currentPath, 'renderDynamicTraits');
+
+		res.push(`import { renderDynamicTraits } from '${relativePath}';`);
+	}
 
 	getDynamicRootTypeComponentMaps().forEach(({ name, values }) => {
 		const entries = values

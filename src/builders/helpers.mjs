@@ -122,6 +122,43 @@ const dynamicTypeComponentTemplate = `
 	};
 `;
 
+//A typeless grid-cell node (e.g. a column cell whose \`traits\` is the dynamic \`$innerTraits$\` token)
+// may carry a COMPONENT trait — a transpiled component (isTranspiledComponent), not a functional
+// config trait. The runtime renders such a trait AS the node's element (wrapWidgets.findComponentTraitIndex);
+// merge-calling it (the default functional-trait path) would run a component as a plain function and
+// produce nothing. This mirrors that: render the first component trait as the type with the remaining
+// traits applied to it, and fall back to merging functional-only lists onto FallbackType. Refs arrive
+// resolved-but-uncalled ({ trait, traitPrps }) so the two kinds can be told apart.
+const renderDynamicTraitsTemplate = `
+	import React from 'react';
+	import { applyTraits } from './helpers';
+
+	export const renderDynamicTraits = ({ sysPrps = {}, prps = {}, traits = [], FallbackType }) => {
+		//A functional trait's resolved ref is a config function — call it to get its config object (the
+		// shape applyTraits merges). Anything already a config object (or a missed map lookup) passes through.
+		const toConfig = t => {
+			const ref = t?.trait ?? t;
+
+			return typeof ref === 'function' ? ref(t?.traitPrps ?? {}) : ref;
+		};
+
+		const componentTrait = traits.find(t => {
+			const ref = t?.trait ?? t;
+
+			return typeof ref === 'function' && ref.isTranspiledComponent;
+		});
+
+		if (componentTrait) {
+			const Type = componentTrait.trait ?? componentTrait;
+			const otherTraits = traits.filter(t => t !== componentTrait).map(toConfig);
+
+			return <Type {...applyTraits({ sysPrps, prps, traits: otherTraits })} traitPrps={componentTrait.traitPrps ?? {}} />;
+		}
+
+		return <FallbackType {...applyTraits({ sysPrps, prps, traits: traits.map(toConfig) })} />;
+	};
+`;
+
 //Builder
 const buildHelpers = () => {
 	const outputPath = join(outputFolder, 'src', 'helpers.jsx');
@@ -137,6 +174,10 @@ const buildHelpers = () => {
 	const dynamicTypeComponentPath = join(outputFolder, 'src', 'dynamicTypeComponent.jsx');
 
 	writeFileSync(dynamicTypeComponentPath, dynamicTypeComponentTemplate, 'utf8');
+
+	const renderDynamicTraitsPath = join(outputFolder, 'src', 'renderDynamicTraits.jsx');
+
+	writeFileSync(renderDynamicTraitsPath, renderDynamicTraitsTemplate, 'utf8');
 };
 
 export default buildHelpers;

@@ -1,5 +1,5 @@
 //Getters / Setters
-import { setNeedsHelpers, setNeedsDynamicTypeComponent, setNeedsRenderWgts } from './generateImports.mjs';
+import { setNeedsHelpers, setNeedsDynamicTypeComponent, setNeedsRenderWgts, setNeedsRenderDynamicTraits } from './generateImports.mjs';
 import { getIsFunctionalTrait } from './isFunctionalTrait.mjs';
 import { getUsedComponentTypes, pushToUsedComponentTypes } from './usedComponentTypes.mjs';
 import {
@@ -78,6 +78,31 @@ const buildScopedDynamicTraitMap = expression => {
 	return buildDynamicTraitMap('array', getDynamicTraitFlatCandidates());
 };
 
+//Grid cell trait-list fields whose entries may be COMPONENT traits (rendered as the cell element)
+// rather than functional config traits. A typeless node carrying ONLY one of these as its dynamic
+// trait list is rendered through renderDynamicTraits instead of the default Label + applyTraits merge.
+const CELL_TRAIT_FIELDS = new Set(['innerTraits', 'extraGridComponentTraits', 'headerTraits']);
+
+//A dynamic trait reference resolves at runtime in one of two ways: it may ALREADY be a transpiled
+// trait function (a handler/MDA built it as `{ trait: <importedFn> }` — the transpiler rewrites such
+// functional-trait paths into direct imports), in which case it is called directly; otherwise it is
+// a path string looked up in the per-file candidate map.
+const resolveRef = (refExpr, mapName) =>
+	`(typeof(${refExpr}) === 'function' ? ${refExpr} : ${mapName}[${refExpr}])`;
+
+//Like the isDynamicArray branch of buildTraitApplication, but emits the resolved refs WITHOUT calling
+// them — `{ trait, traitPrps }` pairs — so renderDynamicTraits can render a component trait as the
+// element type while still calling functional traits for the merge.
+const buildRawDynamicTraitRefs = trait => {
+	const mapName = buildScopedDynamicTraitMap(trait.expression);
+
+	return `(${trait.expression} ?? []).map(trait => {
+		const traitRef = trait.trait ?? trait;
+
+		return { trait: ${resolveRef('traitRef', mapName)}, traitPrps: trait.traitPrps ?? {} };
+	})`;
+};
+
 const buildTraitApplication = trait => {
 	const wrapCondition = expression => {
 		if (!trait.condition)
@@ -90,13 +115,6 @@ const buildTraitApplication = trait => {
 
 		return `isConditionMet({${conditionString}}) ? ${expression} : null`;
 	};
-
-	//A dynamic trait reference resolves at runtime in one of two ways: it may ALREADY be a transpiled
-	// trait function (a handler/MDA built it as `{ trait: <importedFn> }` — the transpiler rewrites such
-	// functional-trait paths into direct imports), in which case it is called directly; otherwise it is
-	// a path string looked up in the per-file candidate map.
-	const resolveRef = (refExpr, mapName) =>
-		`(typeof(${refExpr}) === 'function' ? ${refExpr} : ${mapName}[${refExpr}])`;
 
 	if (trait.isDynamicArray) {
 		const mapName = buildScopedDynamicTraitMap(trait.expression);
@@ -157,6 +175,17 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 
 	const traitsInfo = buildTraitsInfo(obj, { isInRowMda: false });
 	const hasFunctionalTraits = traitsInfo?.otherTraits.length > 0;
+
+	//A typeless node whose ENTIRE trait list is a single dynamic array over a grid cell-trait field
+	// (e.g. `traits: "$innerTraits$"`). Such a list may resolve to a COMPONENT trait, which must be
+	// rendered as the element (not merge-called). Everything else — typed nodes, mixed trait lists,
+	// `$...field$` spreads alongside a main trait — is untouched and keeps the existing applyTraits path.
+	const cellTraitArrayTrait = (
+		!traitsInfo?.mainTrait &&
+		traitsInfo?.otherTraits?.length === 1 &&
+		traitsInfo.otherTraits[0].isDynamicArray &&
+		CELL_TRAIT_FIELDS.has(traitsInfo.otherTraits[0].field)
+	) ? traitsInfo.otherTraits[0] : null;
 
 	if (hasFunctionalTraits)
 		setNeedsHelpers(true);
@@ -301,23 +330,36 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 		restString = '{...rest}';
 
 	let traitsString = '';
+	let cellTraitRender = '';
 
 	if (hasFunctionalTraits && !isFunctionalTraitObject) {
-		const otherTraitsString = traitsInfo.otherTraits.map(buildTraitApplication).join(',');
+		//Typeless cell-trait node (and no React children): render through renderDynamicTraits, passing
+		// the resolved-but-uncalled refs so a component trait becomes the element type. FallbackType is
+		// the node's own component (a plain Label when no main trait), used when the list is functional-only.
+		if (cellTraitArrayTrait && !children.length) {
+			setNeedsRenderDynamicTraits(true);
 
-		//Capture a config-only form of this root component-trait so it can be reused when the trait is
-		// referenced as a CONFIG trait (e.g. a grid's `traitDataManager`). Same prps + otherTraits as the
-		// component, but no sysPrps/scope and no JSX wrapper — applyTraits yields the merged config object.
-		// Captured here, before prpsString is cleared below.
-		if (isRootLevel)
-			rootTraitConfig = `(traitPrps = {}, prps = {}) => applyTraits({ prps: {${prpsString}}, traits: [${otherTraitsString}] })`;
+			cellTraitRender = `renderDynamicTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, FallbackType: ${componentType}, traits: ${buildRawDynamicTraitRefs(cellTraitArrayTrait)} })`;
 
-		traitsString = `
-			{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${otherTraitsString}] }) }
-		`;
+			sysPrpsString = '';
+			prpsString = '';
+		} else {
+			const otherTraitsString = traitsInfo.otherTraits.map(buildTraitApplication).join(',');
 
-		sysPrpsString = '';
-		prpsString = '';
+			//Capture a config-only form of this root component-trait so it can be reused when the trait is
+			// referenced as a CONFIG trait (e.g. a grid's `traitDataManager`). Same prps + otherTraits as the
+			// component, but no sysPrps/scope and no JSX wrapper — applyTraits yields the merged config object.
+			// Captured here, before prpsString is cleared below.
+			if (isRootLevel)
+				rootTraitConfig = `(traitPrps = {}, prps = {}) => applyTraits({ prps: {${prpsString}}, traits: [${otherTraitsString}] })`;
+
+			traitsString = `
+				{...applyTraits({ sysPrps: {${sysPrpsString}}, prps: {${prpsString}}, traits: [${otherTraitsString}] }) }
+			`;
+
+			sysPrpsString = '';
+			prpsString = '';
+		}
 	}
 
 	if (isFunctionalTraitObject) {
@@ -332,7 +374,9 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 	else {
 		const dynamicTypeProp = dynamicTypeAccessor ? `type={${dynamicTypeAccessor}}` : '';
 
-		let inner = `<${componentType} ${dynamicTypeProp} ${traitsString} ${sysPrpsString} ${mainTraitPrpsString} ${prpsString} ${restString}>${children.join('')}</${componentType}>`;
+		let inner = cellTraitRender
+			? cellTraitRender
+			: `<${componentType} ${dynamicTypeProp} ${traitsString} ${sysPrpsString} ${mainTraitPrpsString} ${prpsString} ${restString}>${children.join('')}</${componentType}>`;
 
 		if (dynamicRootType) {
 			const mapName = registerDynamicRootTypeComponentMap(dynamicRootType.values);
@@ -362,7 +406,7 @@ const generateComponent = (obj, isRootLevel = true, isOnlyChild, options = {}) =
 
 			if (!isRootLevel)
 				res = `{${res}}`;
-		} else if (dynamicRootType && !isRootLevel)
+		} else if ((dynamicRootType || cellTraitRender) && !isRootLevel)
 			res = `{${inner}}`;
 		else
 			res = inner;

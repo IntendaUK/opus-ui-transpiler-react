@@ -76,7 +76,10 @@ const buildTraitsInfo = ({ traits }, { isInRowMda }) => {
 
 		res.otherTraits = [{
 			isDynamicArray: true,
-			expression: buildTraitAccessor(traits)
+			expression: buildTraitAccessor(traits),
+			//The bare trait-prop field name (e.g. 'innerTraits'), used to gate the cell-trait
+			// component-trait rendering in generateComponent.
+			field: traits.replaceAll('%', '').replaceAll('$', '')
 		}];
 
 		return res;

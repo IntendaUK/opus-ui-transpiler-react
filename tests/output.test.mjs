@@ -8,6 +8,8 @@ import { before, test } from 'node:test';
 
 import { transformTraitReferences } from '../src/builders/scriptAction.mjs';
 import { rewriteReaderFile } from '../src/builders/resolveDataFedTraitFields.mjs';
+import generateTraitOnMount from '../src/builders/dashboard/generateTraitOnMount.mjs';
+import normalizeTraits from '../src/builders/dashboard/normalizeTraits.mjs';
 
 //The transpiler stages output per-target under output/<targetBasename> so concurrent/back-to-back
 // transpiles into different targets never share files (avoids Windows file-handle contention).
@@ -1957,6 +1959,7 @@ test('generated non-main JSX files have expected React/export structure', () => 
 		.filter(file => basename(file) !== 'helpers.jsx')
 		.filter(file => basename(file) !== 'conditionalRootType.jsx')
 		.filter(file => basename(file) !== 'dynamicTypeComponent.jsx')
+		.filter(file => basename(file) !== 'renderDynamicTraits.jsx')
 		.filter(file => {
 			const label = relative(outputSrc, file);
 
@@ -3984,4 +3987,205 @@ test('data-fed trait-field pass scopes a site to an explicit verified value list
 
 	//The data-fed site itself is preserved (now resolving against the small map).
 	assert.match(contents, /dynamicTraitMap_array\[traitRef\]/);
+});
+
+// --- Grid cell-trait fields: function-preserving normalization + component-trait rendering ---
+
+//The recognized cell-trait normalization morph (mirrors l2_grid columnCellNoEdit's innerTraits):
+// JSON-clones columnConfig.<field> and injects per-cell context. Its JSON clone + {{variable}}
+// substitution would drop a component-trait function import — which the plain-JS emission avoids.
+const cellTraitNormalizationMorph = field => ({
+	morph: true,
+	morphVariable: 'res',
+	morphActions: [
+		{ type: 'stopScript', '^condition': { operator: 'isFalsy', value: `$columnConfig.${field}$` } },
+		{ type: 'setVariable', name: 'columnConfig', value: '$columnConfig$' },
+		{ type: 'setVariable', name: 'columnCellValue', value: '%columnCellValue%' },
+		{
+			type: 'setVariable',
+			name: 'res',
+			value: [
+				'{{eval.',
+				'  const columnConfig = {{variable.columnConfig}};',
+				'  let res;',
+				`  if (columnConfig.${field}) {`,
+				`    const transformed = JSON.parse(JSON.stringify(columnConfig.${field}) ).map(entry => {`,
+				"      if (typeof entry === 'string') { entry = { trait: entry, traitPrps: {} }; }",
+				'      if (!entry.traitPrps) { entry.traitPrps = {}; }',
+				'      entry.traitPrps.columnConfig = columnConfig;',
+				'      entry.traitPrps.columnCellIndex = %columnCellIndex%;',
+				'      entry.traitPrps.columnCellValue = {{variable.columnCellValue}};',
+				'      return entry;',
+				'    });',
+				'    transformed;',
+				'  }',
+				'}}'
+			],
+			inlineKeys: ['value']
+		}
+	]
+});
+
+test('generateTraitOnMount emits plain-JS normalization for innerTraits (preserves imports, no eval)', () => {
+	const out = generateTraitOnMount({
+		acceptPrps: { innerTraits: cellTraitNormalizationMorph('innerTraits') }
+	}, undefined);
+
+	//Plain-JS clone + standard injection — and crucially NOT a JSON-serializing eval that drops imports.
+	assert.match(out, /traitPrps\.innerTraits = traitPrps\.columnConfig\?\.innerTraits/);
+	assert.match(out, /entry\.traitPrps\.columnConfig = traitPrps\.columnConfig/);
+	assert.match(out, /entry\.traitPrps\.columnCellIndex = traitPrps\.columnCellIndex/);
+	assert.match(out, /entry\.traitPrps\.columnCellValue = traitPrps\.columnCellValue/);
+	assert.doesNotMatch(out, /innerTraits = getSyncScriptResult/);
+	assert.doesNotMatch(out, /JSON\.parse/);
+	//innerTraits' morph has a stopScript guard → undefined when the source list is absent.
+	assert.match(out, /: undefined;/);
+});
+
+test('generateTraitOnMount uses [] fallback for extraGridComponentTraits (no stopScript guard)', () => {
+	const morph = cellTraitNormalizationMorph('extraGridComponentTraits');
+	morph.morphActions = morph.morphActions.filter(a => a.type !== 'stopScript');
+
+	const out = generateTraitOnMount({
+		acceptPrps: { extraGridComponentTraits: morph }
+	}, undefined);
+
+	assert.match(out, /traitPrps\.extraGridComponentTraits = traitPrps\.columnConfig\?\.extraGridComponentTraits/);
+	assert.match(out, /: \[\];/);
+	assert.doesNotMatch(out, /extraGridComponentTraits = getSyncScriptResult/);
+});
+
+test('generateTraitOnMount leaves a non-cell-trait morph as a getSyncScriptResult eval', () => {
+	const out = generateTraitOnMount({
+		acceptPrps: {
+			someOtherField: {
+				morph: true,
+				morphVariable: 'res',
+				morphActions: [{ type: 'setVariable', name: 'res', value: '{{eval. 1 + 1 }}' }]
+			}
+		}
+	}, undefined);
+
+	assert.match(out, /getSyncScriptResult/);
+	assert.doesNotMatch(out, /\.map\(\(?entry\)?/);
+});
+
+test('generateTraitOnMount leaves an innerTraits morph of a different shape as a getSyncScriptResult eval', () => {
+	//Same field name, but NOT the recognized clone-and-inject normalization → must fall through untouched.
+	const out = generateTraitOnMount({
+		acceptPrps: {
+			innerTraits: {
+				morph: true,
+				morphVariable: 'res',
+				morphActions: [{ type: 'setVariable', name: 'res', value: '{{eval. somethingElse }}' }]
+			}
+		}
+	}, undefined);
+
+	assert.match(out, /getSyncScriptResult/);
+	assert.doesNotMatch(out, /traitPrps\.columnConfig\?\.innerTraits/);
+});
+
+const createCellTraitRenderSourceApp = () => {
+	const sourceApp = join(tmpRoot, 'source-app-cell-trait-render');
+	const hostTraitPath = join(sourceApp, 'app', 'dashboard', '@myGrid', 'cellHost', 'index.json');
+
+	rmSync(sourceApp, { recursive: true, force: true });
+	cpSync(fixtureSourceApp, sourceApp, { recursive: true });
+
+	//A grid-cell-like host trait: an innerTraits normalization morph (whose entries may be component
+	// traits) plus a TYPELESS node whose entire trait list is the dynamic `$innerTraits$` token.
+	mkdirSync(dirname(hostTraitPath), { recursive: true });
+	writeFileSync(hostTraitPath, JSON.stringify({
+		type: 'container',
+		acceptPrps: {
+			columnConfig: 'object',
+			columnCellIndex: 'string',
+			columnCellValue: 'mixed',
+			innerTraits: cellTraitNormalizationMorph('innerTraits')
+		},
+		wgts: [{
+			id: 'customCell-%columnCellIndex%',
+			condition: { operator: 'isTruthy', value: '$columnConfig.innerTraits$' },
+			traits: '$innerTraits$'
+		}]
+	}, null, '\t'), 'utf8');
+
+	const sampleDashboardPath = join(sourceApp, 'app', 'dashboard', 'sampleDashboard.json');
+	const sampleDashboard = JSON.parse(readFileSync(sampleDashboardPath, 'utf8'));
+	sampleDashboard.wgts.push({
+		id: 'cellHostUsage',
+		traits: [{ trait: '@myGrid/cellHost/index', traitPrps: { columnConfig: {}, columnCellIndex: '0', columnCellValue: 'x' } }]
+	});
+	writeFileSync(sampleDashboardPath, JSON.stringify(sampleDashboard, null, '\t'), 'utf8');
+
+	return sourceApp;
+};
+
+test('typeless cell-trait node renders the component trait as the type (renderDynamicTraits), with function-preserving normalization', () => {
+	const sourceApp = createCellTraitRenderSourceApp();
+	const targetApp = join(tmpRoot, 'target-app-cell-trait-render');
+
+	rmSync(targetApp, { recursive: true, force: true });
+
+	assert.doesNotThrow(() => {
+		execFileSync(process.execPath, ['src/transpile.mjs'], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				OPUS_TRANSPILER_SOURCE_APPLICATION_FOLDER: sourceApp,
+				OPUS_TRANSPILER_TARGET_APPLICATION_FOLDER: targetApp,
+				OPUS_TRANSPILER_REPLACE_MAIN_JSX: 'true'
+			},
+			stdio: 'pipe'
+		});
+	});
+
+	const component = readFileSync(
+		join(targetApp, 'src', 'dashboard', '@myGrid', 'cellHost', 'index.jsx'),
+		'utf8'
+	);
+
+	//Problem 1: normalization is plain JS (function imports survive) — no JSON-cloning eval.
+	assert.match(component, /traitPrps\.innerTraits = traitPrps\.columnConfig\?\.innerTraits/);
+	assert.match(component, /entry\.traitPrps\.columnConfig = traitPrps\.columnConfig/);
+	assert.doesNotMatch(component, /innerTraits = getSyncScriptResult/);
+	assert.doesNotMatch(component, /JSON\.parse/);
+
+	//Problem 2: the typeless node renders through renderDynamicTraits (component trait becomes the type)
+	// rather than merging onto a <Label>, and the helper is imported + emitted.
+	assert.match(component, /renderDynamicTraits\(\{/);
+	assert.match(component, /FallbackType:/);
+	assert.match(component, /import \{ renderDynamicTraits \} from ['"][^'"]*renderDynamicTraits['"];/);
+	assert.ok(existsSync(join(targetApp, 'src', 'renderDynamicTraits.jsx')));
+});
+
+test('normalizeTraits keeps a singular trait flat inside cell trait-ref-list fields, but wraps it inside wgts', () => {
+	const node = {
+		prps: {
+			columnConfig: [{
+				key: 'types',
+				innerTraits: [{ trait: '@x/roleTypeCell', traitPrps: {} }],
+				headerTraits: [{ trait: '@x/headerCell' }],
+				extraGridComponentTraits: [{ trait: '@x/extra' }]
+			}]
+		},
+		wgts: [{ trait: '@x/someWidgetTrait', traitPrps: {} }]
+	};
+
+	normalizeTraits(node);
+
+	const col = node.prps.columnConfig[0];
+
+	//Cell trait-ref-list entries stay flat (still `{ trait }`, not wrapped into `{ traits: [...] }`).
+	assert.equal(col.innerTraits[0].trait, '@x/roleTypeCell');
+	assert.equal(col.innerTraits[0].traits, undefined);
+	assert.equal(col.headerTraits[0].trait, '@x/headerCell');
+	assert.equal(col.headerTraits[0].traits, undefined);
+	assert.equal(col.extraGridComponentTraits[0].trait, '@x/extra');
+	assert.equal(col.extraGridComponentTraits[0].traits, undefined);
+
+	//A wgts entry IS a node — the singular trait is still normalized into a traits array.
+	assert.equal(node.wgts[0].trait, undefined);
+	assert.equal(node.wgts[0].traits[0].trait, '@x/someWidgetTrait');
 });

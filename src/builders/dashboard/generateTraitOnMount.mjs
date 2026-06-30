@@ -17,6 +17,62 @@ const buildDefaultValueExpression = value => {
 	return `\`${interpolated}\``;
 };
 
+//Grid cell trait-list fields whose normalization morph clones `columnConfig.<field>` (entries that may
+// be COMPONENT trait references) and injects per-cell context. The source clone is JSON-based and routes
+// columnConfig through a {{variable}} substitution — both serialize, silently dropping the transpiler's
+// direct function-import trait refs, so a component trait reference never survives. We replace ONLY this
+// recognized shape with a function-preserving plain-JS normalization. Anything else is left untouched.
+const CELL_TRAIT_FIELDS = new Set(['innerTraits', 'extraGridComponentTraits', 'headerTraits']);
+
+//The eval body of a morph spec is the value of the action that assigns the morph variable.
+const getMorphEvalBody = v => {
+	if (!Array.isArray(v.morphActions))
+		return '';
+
+	const action = v.morphActions.find(a => a?.type === 'setVariable' && a.name === v.morphVariable);
+
+	if (!action)
+		return '';
+
+	return Array.isArray(action.value) ? action.value.join('\n') : (action.value ?? '');
+};
+
+const isCellTraitNormalization = (k, v) => {
+	if (!CELL_TRAIT_FIELDS.has(k) || v.morph !== true)
+		return false;
+
+	const body = getMorphEvalBody(v);
+
+	return (
+		body.includes(`columnConfig.${k}`) &&
+		body.includes('.map(') &&
+		body.includes('entry.traitPrps')
+	);
+};
+
+//Shallow per-entry clone (never JSON) preserves function imports; the standard columnConfig /
+// columnCellIndex / columnCellValue injection mirrors the source eval. A field whose morph carries a
+// stopScript guard yields `undefined` when its source list is absent (matches the source); otherwise `[]`.
+const buildCellTraitNormalization = (k, v) => {
+	const fallback = v.morphActions.some(a => a?.type === 'stopScript') ? 'undefined' : '[]';
+
+	return `
+		traitPrps.${k} = traitPrps.columnConfig?.${k}
+			? traitPrps.columnConfig.${k}.map(entry => {
+				entry = typeof entry === 'string'
+					? { trait: entry, traitPrps: {} }
+					: { ...entry, traitPrps: { ...(entry.traitPrps ?? {}) } };
+
+				entry.traitPrps.columnConfig = traitPrps.columnConfig;
+				entry.traitPrps.columnCellIndex = traitPrps.columnCellIndex;
+				entry.traitPrps.columnCellValue = traitPrps.columnCellValue;
+
+				return entry;
+			})
+			: ${fallback};
+	`;
+};
+
 const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => {
 	const applyDefaults = Object.entries(acceptPrps)
 		.filter(([k, v]) => v.dft !== undefined)
@@ -42,6 +98,13 @@ const generateTraitOnMount = ({ acceptPrps, id: idFromRootComponent }, path) => 
 	const morphers = Object.entries(acceptPrps)
 		.filter(([k, v]) => v.morph === true)
 		.map(([k, v]) => {
+			//A grid cell-trait normalization (innerTraits / extraGridComponentTraits / headerTraits)
+			// whose JSON-cloning eval would drop component-trait function imports: emit it as plain JS
+			// that preserves the imports. Strictly gated on the field name + the recognized morph shape,
+			// so any other morph falls through to the existing emission unchanged.
+			if (isCellTraitNormalization(k, v))
+				return buildCellTraitNormalization(k, v);
+
 			//A morph eval that references a component trait can't survive as an eval string (the
 			// rewritten component import isn't in eval scope). Lift it into a real handler module and
 			// call it directly instead. Returns null for anything not matching that strict shape, in
